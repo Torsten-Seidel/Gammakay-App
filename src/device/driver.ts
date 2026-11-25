@@ -21,6 +21,8 @@ export interface KeyboardDriver {
   readonly capabilities: Capabilities;
   /** Was der Treiber bereits beherrscht. Beim echten Gerät wächst das mit dem Protokoll. */
   readonly supports: { read: boolean; write: boolean };
+  /** Bereiche, die der Treiber schreiben kann. Fehlt die Angabe, gelten alle als schreibbar. */
+  readonly writableSections?: ConfigSection[];
   readConfig(): Promise<DeviceConfig>;
   writeSection(section: ConfigSection, config: DeviceConfig): Promise<void>;
   disconnect(): Promise<void>;

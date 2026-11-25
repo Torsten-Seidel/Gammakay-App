@@ -13,6 +13,7 @@ const EFFECTS: { id: LightEffect; label: string }[] = [
   { id: 'spectrum', label: 'Spektrum' },
   { id: 'custom', label: 'Pro Taste' },
 ];
+const DEVICE_EFFECT = { id: 'device' as const, label: 'Vom Gerät' };
 
 const DIRECTIONS: { id: LightDirection; label: string }[] = [
   { id: 'right', label: '→' }, { id: 'left', label: '←' }, { id: 'down', label: '↓' }, { id: 'up', label: '↑' },
@@ -39,7 +40,7 @@ export function LightingPanel() {
       <div className="grid-3">
         <Card title="Effekt">
           <div className="chip-grid">
-            {EFFECTS.map((e) => (
+            {(l.effect === 'device' ? [DEVICE_EFFECT, ...EFFECTS] : EFFECTS).map((e) => (
               <button key={e.id} className={`chip ${l.effect === e.id ? 'active' : ''}`} onClick={() => set({ effect: e.id })}>{e.label}</button>
             ))}
           </div>
@@ -76,7 +77,7 @@ export function LightingPanel() {
           <div className="row">
             <span>Seitenlicht</span>
             <select value={l.side.effect} onChange={(e) => set({ side: { ...l.side, effect: e.target.value as LightEffect } })}>
-              {EFFECTS.filter((e) => e.id !== 'custom').map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+              {[DEVICE_EFFECT, ...EFFECTS.filter((e) => e.id !== 'custom')].map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
             </select>
             <input type="color" value={l.side.color} onChange={(e) => set({ side: { ...l.side, color: e.target.value } })} />
           </div>

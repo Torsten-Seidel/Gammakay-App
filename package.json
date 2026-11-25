@@ -8,9 +8,10 @@
     "dev:web": "vite",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
-    "start": "vite build && electron . --dist"
+    "start": "vite build && electron . --dist",
+    "test": "node --test src/device/gamakay/protocol.test.ts"
   },
-  "type": "commonjs",
+  "type": "module",
   "dependencies": {
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FUNCTIONS, describeAction } from '../device/keycodes';
 import { keyLabel } from '../device/layout';
 import { actionFor, type KeyAction } from '../device/model';
-import { useApp, useProfile } from '../store';
+import { useApp, useMacros, useProfile } from '../store';
 import { Card, EmptyHint, KeyPalette, PanelHeader } from '../components/ui';
 
 type Tab = 'key' | 'combo' | 'function' | 'macro';
@@ -11,7 +11,7 @@ export function KeymapPanel() {
   const selected = useApp((s) => s.selected);
   const layer = useApp((s) => s.layer);
   const layout = useApp((s) => s.layout);
-  const macros = useApp((s) => s.config?.macros ?? []);
+  const macros = useMacros();
   const editProfile = useApp((s) => s.editProfile);
   const profile = useProfile();
   const [tab, setTab] = useState<Tab>('key');

@@ -128,10 +128,11 @@ export function App() {
         ) : (
           <>
             <TopBar />
-            {!driver.supports.read && (
+            {driver.writableSections && (
               <div className="banner">
-                Verbunden mit <strong>{driver.info.name}</strong>. Das Gamakay-Protokoll ist noch nicht implementiert: Die
-                Werte unten sind Standardwerte (Entwurf) und können noch nicht auf die Tastatur geschrieben werden.
+                Verbunden mit <strong>{driver.info.name}</strong> ({driver.info.firmware ?? 'Firmware unbekannt'}). Vom Gerät
+                gelesen: Licht und Energiespar-Zeiten – alles andere sind noch Standardwerte. Schreiben kann die App bisher
+                nur die <strong>Helligkeit</strong> (Beleuchtung).
               </div>
             )}
             {WITH_KEYBOARD.includes(view) && <Stage pressed={[]} />}

@@ -43,8 +43,9 @@ export type AdvancedKey =
 
 export type AdvancedKind = AdvancedKey['kind'];
 
+/** 'device' = Effekt vom Gerät, dessen Modusnummer noch nicht zugeordnet ist */
 export type LightEffect =
-  | 'off' | 'static' | 'breathing' | 'wave' | 'ripple' | 'starlight' | 'reactive' | 'spectrum' | 'custom';
+  | 'off' | 'static' | 'breathing' | 'wave' | 'ripple' | 'starlight' | 'reactive' | 'spectrum' | 'custom' | 'device';
 export type LightDirection = 'right' | 'left' | 'down' | 'up';
 
 export interface LightingConfig {

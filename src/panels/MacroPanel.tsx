@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { keyLabel } from '../device/layout';
 import { newId, type MacroPlayback, type MacroStep } from '../device/model';
-import { useApp } from '../store';
+import { useApp, useMacros } from '../store';
 import { Card, EmptyHint, PanelHeader } from '../components/ui';
 import { Icon } from '../components/Icon';
 
@@ -13,7 +13,7 @@ const PLAYBACK: { id: MacroPlayback; label: string }[] = [
 ];
 
 export function MacroPanel() {
-  const macros = useApp((s) => s.config?.macros ?? []);
+  const macros = useMacros();
   const layout = useApp((s) => s.layout);
   const edit = useApp((s) => s.edit);
   const [activeId, setActiveId] = useState<string | null>(null);

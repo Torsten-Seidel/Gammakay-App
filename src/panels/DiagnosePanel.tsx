@@ -17,6 +17,16 @@ function describeReports(list: HIDReportInfo[] | undefined): string {
 
 const deviceKey = (d: HIDDevice, i: number) => `${d.vendorId}-${d.productId}-${i}`;
 
+/** Schreibt alle Collections eines Interfaces ins Log (zum Kopieren/Weitergeben). */
+function logDeviceDetails(d: HIDDevice) {
+  log('info', `${d.productName} VID ${hex16(d.vendorId)} PID ${hex16(d.productId)}, ${d.collections.length} Collection(s)`);
+  d.collections.forEach((c, i) => {
+    log('info',
+      `  Collection ${i + 1}: UsagePage ${hex16(c.usagePage)} Usage ${hex16(c.usage)} | ` +
+      `Input ${describeReports(c.inputReports)} | Output ${describeReports(c.outputReports)} | Feature ${describeReports(c.featureReports)}`);
+  });
+}
+
 export function DiagnosePanel() {
   const [devices, setDevices] = useState<HIDDevice[]>([]);
   const [listening, setListening] = useState<Set<HIDDevice>>(new Set());
@@ -49,7 +59,7 @@ export function DiagnosePanel() {
     setError(null);
     try {
       const picked = await requestHidDevices();
-      for (const d of picked) log('info', `Freigegeben: ${d.productName} VID ${hex16(d.vendorId)} PID ${hex16(d.productId)}, ${d.collections.length} Collection(s)`);
+      for (const d of picked) logDeviceDetails(d);
       await refresh();
     } catch (e) {
       setError(String(e));
@@ -97,6 +107,9 @@ export function DiagnosePanel() {
   return (
     <div className="panel">
       <PanelHeader title="Diagnose (nur lesend)">
+        <button className="btn ghost" disabled={!devices.length} onClick={() => devices.forEach(logDeviceDetails)}>
+          Details ins Log
+        </button>
         <button className="btn primary" disabled={!hasHid} onClick={addDevice}>HID-Gerät freigeben</button>
       </PanelHeader>
       {!hasHid && <p className="error-text">WebHID ist hier nicht verfügbar. Bitte die Desktop-App (Electron) oder Chrome/Edge verwenden.</p>}

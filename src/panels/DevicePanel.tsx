@@ -1,6 +1,6 @@
 import type { DeviceSettings } from '../device/model';
 import type { LayoutVariant } from '../device/layout';
-import { useApp } from '../store';
+import { useApp, useCapabilities } from '../store';
 import { Card, EmptyHint, PanelHeader } from '../components/ui';
 
 const TIMERS: { key: keyof DeviceSettings; label: string; hint?: string }[] = [
@@ -12,7 +12,7 @@ const TIMERS: { key: keyof DeviceSettings; label: string; hint?: string }[] = [
 
 export function DevicePanel() {
   const settings = useApp((s) => s.config?.settings);
-  const rates = useApp((s) => s.driver?.capabilities.pollingRates ?? []);
+  const rates = useCapabilities().pollingRates;
   const info = useApp((s) => s.driver?.info);
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);

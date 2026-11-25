@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { MockDriver } from '../device/mockDriver';
-import { GamakayHidDriver, requestHidDevices } from '../device/hidDriver';
+import { GamakayHidDriver } from '../device/hidDriver';
 import { useApp, useDirtySections, type View } from '../store';
 import { Icon } from './Icon';
 
@@ -128,8 +128,7 @@ export function Welcome() {
   async function connectUsb() {
     setError(null);
     try {
-      const devices = await requestHidDevices();
-      if (devices.length) await connect(new GamakayHidDriver(devices));
+      await connect(await GamakayHidDriver.connect());
     } catch (e) {
       setError(String(e));
     }
@@ -148,8 +147,8 @@ export function Welcome() {
       </div>
       {error && <p className="error-text">{error}</p>}
       <p className="hint">
-        Das Gamakay-Protokoll ist noch nicht implementiert. Mit der echten Tastatur funktioniert vorerst nur die
-        Diagnose (Interfaces auflisten, Eingaben mitlesen).
+        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst nur
+        die Helligkeit. Bitte GearHub vorher schließen.
       </p>
     </div>
   );

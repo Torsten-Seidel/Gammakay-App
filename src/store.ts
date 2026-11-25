@@ -1,8 +1,10 @@
 import { create } from 'zustand';
-import type { KeyboardDriver } from './device/driver';
+import { TK75_CAPABILITIES, type Capabilities, type KeyboardDriver } from './device/driver';
 import { log } from './device/log';
 import type { LayoutVariant } from './device/layout';
-import { diffSections, type ConfigSection, type DeviceConfig, type KeyId, type LayerId, type Profile } from './device/model';
+import {
+  diffSections, type ConfigSection, type DeviceConfig, type KeyId, type LayerId, type Macro, type Profile,
+} from './device/model';
 
 export type View =
   | 'keymap' | 'switches' | 'advanced' | 'macros' | 'lighting' | 'display' | 'device' | 'profiles' | 'diagnose';
@@ -127,13 +129,21 @@ export const useApp = create<AppState>((set, get) => ({
   async apply() {
     const { driver, config, deviceConfig } = get();
     if (!driver || !config || !deviceConfig) return;
-    const sections = diffSections(deviceConfig, config);
-    if (!sections.length) return;
+    const changed = diffSections(deviceConfig, config);
+    const sections = driver.writableSections ? changed.filter((s) => driver.writableSections!.includes(s)) : changed;
+    const skipped = changed.filter((s) => !sections.includes(s));
+    if (!sections.length) {
+      if (skipped.length) set({ error: `Diese Änderungen kann die App noch nicht auf die Tastatur schreiben: ${skipped.join(', ')}` });
+      return;
+    }
     set({ busy: true, error: null });
     try {
       for (const section of sections) await driver.writeSection(section, config);
-      set({ deviceConfig: structuredClone(config) });
+      // Mit Teil-Unterstützung den echten Gerätestand neu lesen, sonst gilt der Entwurf als geschrieben.
+      const fresh = driver.writableSections ? await driver.readConfig() : structuredClone(config);
+      set({ deviceConfig: fresh });
       log('info', `Übernommen: ${sections.join(', ')}`);
+      if (skipped.length) log('info', `Nicht geschrieben (noch nicht unterstützt): ${skipped.join(', ')}`);
     } catch (e) {
       set({ error: String(e) });
       log('error', String(e));
@@ -155,6 +165,17 @@ export function useDirtySections(): ConfigSection[] {
   const config = useApp((s) => s.config);
   const deviceConfig = useApp((s) => s.deviceConfig);
   return config && deviceConfig ? diffSections(deviceConfig, config) : [];
+}
+
+// Selektoren müssen stabile Referenzen liefern: ein neues `[]` pro Aufruf löst in Zustand v5 eine Endlosschleife aus.
+const NO_MACROS: Macro[] = [];
+
+export function useMacros(): Macro[] {
+  return useApp((s) => s.config?.macros ?? NO_MACROS);
+}
+
+export function useCapabilities(): Capabilities {
+  return useApp((s) => s.driver?.capabilities ?? TK75_CAPABILITIES);
 }
 
 export function useProfile(): Profile | null {

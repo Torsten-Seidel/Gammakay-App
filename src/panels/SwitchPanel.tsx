@@ -1,11 +1,11 @@
 import { switchFor, type SwitchConfig } from '../device/model';
-import { useApp, useProfile } from '../store';
+import { useApp, useCapabilities, useProfile } from '../store';
 import { Card, EmptyHint, PanelHeader, Slider, Toggle } from '../components/ui';
 
 export function SwitchPanel() {
   const selected = useApp((s) => s.selected);
   const editProfile = useApp((s) => s.editProfile);
-  const travel = useApp((s) => s.driver?.capabilities.travel ?? { min: 0.1, max: 3.4, step: 0.01 });
+  const travel = useCapabilities().travel;
   const profile = useProfile();
   if (!profile) return null;
 

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { describeAction } from '../device/keycodes';
 import { KNOB, LAYOUTS, LAYOUT_HEIGHT, LAYOUT_WIDTH, keyLabel, type KeyDef } from '../device/layout';
 import { actionFor, switchFor, type KeyId } from '../device/model';
-import { useApp, useProfile } from '../store';
+import { useApp, useMacros, useProfile } from '../store';
 
 const UNIT = 54;
 const GAP = 4;
@@ -22,7 +22,7 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
   const view = useApp((s) => s.view);
   const layer = useApp((s) => s.layer);
   const selected = useApp((s) => s.selected);
-  const macros = useApp((s) => s.config?.macros ?? []);
+  const macros = useMacros();
   const toggleKey = useApp((s) => s.toggleKey);
   const profile = useProfile();
   const keys = LAYOUTS[layout];
