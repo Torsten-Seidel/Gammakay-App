@@ -3,7 +3,7 @@ import { TK75_CAPABILITIES, type Capabilities, type KeyboardDriver } from './dev
 import { log } from './device/log';
 import type { LayoutVariant } from './device/layout';
 import {
-  diffSections, type ConfigSection, type DeviceConfig, type KeyId, type LayerId, type Macro, type Profile,
+  copySections, diffSections, type ConfigSection, type DeviceConfig, type KeyId, type LayerId, type Macro, type Profile,
 } from './device/model';
 
 export type View =
@@ -34,7 +34,10 @@ interface AppState {
   selected: KeyId[];
   busy: boolean;
   error: string | null;
+  /** Licht-Vorschau: zufällige Tastendrücke für reaktive Effekte simulieren */
+  previewSimulate: boolean;
 
+  setPreviewSimulate(on: boolean): void;
   connect(driver: KeyboardDriver): Promise<void>;
   disconnect(): Promise<void>;
   setView(view: View): void;
@@ -63,6 +66,9 @@ export const useApp = create<AppState>((set, get) => ({
   selected: [],
   busy: false,
   error: null,
+  previewSimulate: true,
+
+  setPreviewSimulate: (on) => set({ previewSimulate: on }),
 
   async connect(driver) {
     set({ busy: true, error: null });
@@ -141,7 +147,11 @@ export const useApp = create<AppState>((set, get) => ({
       for (const section of sections) await driver.writeSection(section, config);
       // Mit Teil-Unterstützung den echten Gerätestand neu lesen, sonst gilt der Entwurf als geschrieben.
       const fresh = driver.writableSections ? await driver.readConfig() : structuredClone(config);
-      set({ deviceConfig: fresh });
+      // Geschriebene Bereiche im Entwurf an den Gerätestand angleichen (z. B. gilt das Licht für alle Profile),
+      // damit sie nicht weiter als geändert zählen. Ungeschriebene Änderungen bleiben erhalten.
+      const draft = structuredClone(get().config ?? config);
+      copySections(fresh, draft, sections);
+      set({ deviceConfig: fresh, config: draft });
       log('info', `Übernommen: ${sections.join(', ')}`);
       if (skipped.length) log('info', `Nicht geschrieben (noch nicht unterstützt): ${skipped.join(', ')}`);
     } catch (e) {

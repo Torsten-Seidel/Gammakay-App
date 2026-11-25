@@ -1,4 +1,5 @@
 import type { ConfigSection, DeviceConfig } from './model';
+import { LED_EFFECTS } from './gamakay/protocol';
 
 export interface DeviceInfo {
   name: string;
@@ -14,6 +15,11 @@ export interface Capabilities {
   travel: { min: number; max: number; step: number };
   /** Displayauflösung; null = kein Display bekannt */
   display: { width: number; height: number } | null;
+  /** Lichteffekte in Anzeige-Reihenfolge */
+  /** `options`: Richtungen/Muster des Effekts (Index wird geschrieben) */
+  lightEffects: { id: string; label: string; options?: string[] }[];
+  /** Tempo- und Helligkeitsstufen (0 … max) */
+  lightLevels: number;
 }
 
 export interface KeyboardDriver {
@@ -34,4 +40,6 @@ export const TK75_CAPABILITIES: Capabilities = {
   travel: { min: 0.1, max: 3.4, step: 0.01 },
   // Annahme – die echte Auflösung des TK75-Displays muss noch ermittelt werden.
   display: { width: 128, height: 128 },
+  lightEffects: LED_EFFECTS.map(({ id, label, options }) => ({ id, label, options })),
+  lightLevels: 4,
 };

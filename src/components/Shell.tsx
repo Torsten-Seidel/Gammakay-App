@@ -147,8 +147,8 @@ export function Welcome() {
       </div>
       {error && <p className="error-text">{error}</p>}
       <p className="hint">
-        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst nur
-        die Helligkeit. Bitte GearHub vorher schließen.
+        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst das
+        Tastenlicht. Bitte GearHub vorher schließen.
       </p>
     </div>
   );

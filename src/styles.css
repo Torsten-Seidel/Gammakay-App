@@ -220,3 +220,29 @@ input[type='color'] { width: 44px; height: 32px; border: 1px solid var(--border)
 .device-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); cursor: pointer; text-align: left; }
 .device-row:hover { border-color: var(--accent); }
 .toast { position: fixed; bottom: 18px; right: 18px; max-width: 480px; background: #3a1823; border: 1px solid var(--danger); border-radius: 10px; padding: 12px 14px; display: flex; gap: 12px; align-items: flex-start; z-index: 60; }
+
+/* Beleuchtung */
+.grid-light { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+@media (max-width: 1350px) { .grid-light { grid-template-columns: 1fr 1fr; } .grid-light > :first-child { grid-column: 1 / -1; } }
+.chip-grid.six { grid-template-columns: repeat(6, 1fr); }
+.chip-grid.six .chip { font-size: 12px; padding: 8px 4px; }
+.dimmed { opacity: 0.45; }
+.swatch.inline { display: inline-block; width: 12px; height: 12px; vertical-align: middle; border-width: 1px; }
+
+/* Licht-Vorschau */
+.key.lit { box-shadow: 0 3px 0 #15171c, inset 0 0 0 1px var(--key-glow), inset 0 -18px 24px -10px var(--key-glow), 0 0 10px -4px var(--key-glow); }
+.stage-bar .check { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; text-transform: none; letter-spacing: 0; color: var(--text); cursor: pointer; }
+.stage-bar .check input { accent-color: var(--accent); }
+.key.lit { background: linear-gradient(180deg, color-mix(in srgb, var(--key-glow) 30%, #2a2e37), color-mix(in srgb, var(--key-glow) 45%, #22262e)); }
+
+/* Richtung (Licht) */
+.direction { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.direction-title { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.4px; }
+.dpad-wrap { display: flex; align-items: center; gap: 14px; }
+.dpad { display: grid; grid-template-columns: repeat(3, 34px); grid-template-rows: repeat(3, 34px); gap: 3px;
+  grid-template-areas: ". up ." "left mid right" ". down ."; }
+.dpad-btn { border: 1px solid #2f3440; border-radius: 6px; background: var(--surface-3); color: var(--text); font-size: 16px; cursor: pointer; }
+.dpad-btn:hover { border-color: var(--accent); }
+.dpad-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.dpad-center { border-radius: 50%; margin: 9px; background: #2f3440; }
+.chip-icon { font-size: 14px; }

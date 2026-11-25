@@ -70,7 +70,8 @@ function Stage({ pressed }: { pressed: KeyId[] }) {
   const layer = useApp((s) => s.layer);
   const layout = useApp((s) => s.layout);
   const selected = useApp((s) => s.selected);
-  const { setLayer, setSelection } = useApp.getState();
+  const simulate = useApp((s) => s.previewSimulate);
+  const { setLayer, setSelection, setPreviewSimulate } = useApp.getState();
   const isDiag = view === 'diagnose';
   return (
     <section className="stage">
@@ -89,6 +90,14 @@ function Stage({ pressed }: { pressed: KeyId[] }) {
         <div className="stage-bar">
           {isDiag ? (
             <span>Tastentester: gedrückte Tasten leuchten auf.</span>
+          ) : view === 'lighting' ? (
+            <>
+              <span>Vorschau (angenähert) – Tasten anklicken oder tippen löst reaktive Effekte aus</span>
+              <label className="check">
+                <input type="checkbox" checked={simulate} onChange={(e) => setPreviewSimulate(e.target.checked)} />
+                Tastendrücke simulieren
+              </label>
+            </>
           ) : (
             <>
               <span>Tasten auswählen: Klick, Strg/Shift-Klick oder Ziehen</span>
@@ -132,7 +141,7 @@ export function App() {
               <div className="banner">
                 Verbunden mit <strong>{driver.info.name}</strong> ({driver.info.firmware ?? 'Firmware unbekannt'}). Vom Gerät
                 gelesen: Licht und Energiespar-Zeiten – alles andere sind noch Standardwerte. Schreiben kann die App bisher
-                nur die <strong>Helligkeit</strong> (Beleuchtung).
+                nur das <strong>Tastenlicht</strong> (Effekt, Tempo, Helligkeit, Farbe).
               </div>
             )}
             {WITH_KEYBOARD.includes(view) && <Stage pressed={[]} />}

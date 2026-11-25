@@ -19,7 +19,7 @@ export class MockDriver implements KeyboardDriver {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as DeviceConfig;
-        if (parsed.version === 1) return parsed;
+        if (parsed.version === 2) return parsed;
       }
     } catch {
       // ungültige oder blockierte Daten → Standardwerte

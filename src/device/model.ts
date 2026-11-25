@@ -43,20 +43,22 @@ export type AdvancedKey =
 
 export type AdvancedKind = AdvancedKey['kind'];
 
-/** 'device' = Effekt vom Gerät, dessen Modusnummer noch nicht zugeordnet ist */
-export type LightEffect =
-  | 'off' | 'static' | 'breathing' | 'wave' | 'ripple' | 'starlight' | 'reactive' | 'spectrum' | 'custom' | 'device';
-export type LightDirection = 'right' | 'left' | 'down' | 'up';
+/**
+ * Effekt-ID aus `capabilities.lightEffects` (z. B. "wave").
+ * Unbekannte Gerätecodes erscheinen als "device-0x0d" und werden unverändert zurückgeschrieben.
+ */
+export type LightEffect = string;
 
 export interface LightingConfig {
   effect: LightEffect;
+  /** true = bunt („Glanz“), false = eine Farbe */
+  rainbow: boolean;
   color: string; // #rrggbb
   brightness: number; // 0–4
-  speed: number; // 0–4
-  direction: LightDirection;
-  /** Farbe pro Taste (nur Effekt "custom") */
-  perKey: Record<KeyId, string>;
-  side: { effect: LightEffect; color: string; brightness: number };
+  speed: number; // 0–4, 4 = schnell
+  /** Richtung/Muster-Index (nur bei Effekten mit Optionen; fehlt = 0) */
+  option?: number;
+  side: { effect: LightEffect; rainbow: boolean; color: string; brightness: number; speed: number };
 }
 
 export interface Profile {
@@ -102,7 +104,7 @@ export interface DisplayConfig {
 }
 
 export interface DeviceConfig {
-  version: 1;
+  version: 2;
   activeProfile: number;
   profiles: Profile[];
   macros: Macro[];
@@ -136,19 +138,18 @@ function defaultProfile(index: number): Profile {
     advanced: [],
     lighting: {
       effect: 'wave',
+      rainbow: true,
       color: '#8b7cf6',
       brightness: 3,
       speed: 2,
-      direction: 'right',
-      perKey: {},
-      side: { effect: 'static', color: '#8b7cf6', brightness: 3 },
+      side: { effect: 'static', rainbow: false, color: '#8b7cf6', brightness: 3, speed: 2 },
     },
   };
 }
 
 export function createDefaultConfig(profileCount = 4): DeviceConfig {
   return {
-    version: 1,
+    version: 2,
     activeProfile: 0,
     profiles: Array.from({ length: profileCount }, (_, i) => defaultProfile(i)),
     macros: [],
@@ -179,6 +180,42 @@ export function diffSections(a: DeviceConfig, b: DeviceConfig): ConfigSection[] 
   if (!same(a.settings, b.settings)) out.push('settings');
   if (!same(a.display, b.display)) out.push('display');
   return out;
+}
+
+/** Übernimmt die angegebenen Bereiche von `from` nach `to` (verändert `to`). */
+export function copySections(from: DeviceConfig, to: DeviceConfig, sections: ConfigSection[]): void {
+  const clone = structuredClone(from);
+  for (const s of sections) {
+    switch (s) {
+      case 'activeProfile':
+        to.activeProfile = clone.activeProfile;
+        to.profiles.forEach((p, i) => (p.name = clone.profiles[i]?.name ?? p.name));
+        break;
+      case 'keymap':
+      case 'advanced':
+      case 'lighting':
+        to.profiles.forEach((p, i) => {
+          if (clone.profiles[i]) (p as unknown as Record<string, unknown>)[s] = clone.profiles[i][s];
+        });
+        break;
+      case 'switches':
+        to.profiles.forEach((p, i) => {
+          if (!clone.profiles[i]) return;
+          p.switches = clone.profiles[i].switches;
+          p.defaultSwitch = clone.profiles[i].defaultSwitch;
+        });
+        break;
+      case 'macros':
+        to.macros = clone.macros;
+        break;
+      case 'settings':
+        to.settings = clone.settings;
+        break;
+      case 'display':
+        to.display = clone.display;
+        break;
+    }
+  }
 }
 
 export function newId(prefix: string): string {

@@ -47,11 +47,47 @@ export function readPacket(cmd: number): Uint8Array {
 
 // ---------- Licht ----------
 
-/** Bytes 1..7 der Licht-Antwort: Modus, ?, Helligkeit, ?, R, G, B */
+/**
+ * Effektcodes für Byte 1 (Reihenfolge wie in GearHub). Mitschnitt 5, docs/protocol.md.
+ * `options`: Richtungs-/Musteroptionen in Gerätereihenfolge (Index = oberes Halbbyte von Byte 4).
+ */
+export const LED_EFFECTS: { id: string; label: string; code: number; options?: string[] }[] = [
+  { id: 'wave', label: 'Welle', code: 0x04, options: ['Nach rechts', 'Nach links', 'Nach unten', 'Nach oben'] },
+  { id: 'ripple', label: 'Ripple', code: 0x05 },
+  { id: 'starlight', label: 'Sternenlicht', code: 0x06 },
+  { id: 'current', label: 'Strom', code: 0x07, options: ['Zickzack', 'Spirale'] },
+  { id: 'shadow', label: 'Schatten', code: 0x08 },
+  { id: 'mountain-wave', label: 'Berg Welle', code: 0x09 },
+  { id: 'sine-wave', label: 'Sinuswelle', code: 0x0a },
+  { id: 'kaleidoscope', label: 'Kaleidoskop', code: 0x0b, options: ['Nach außen', 'Nach innen'] },
+  { id: 'snow-trail', label: 'Schneespur', code: 0x13 },
+  { id: 'flower-wave', label: 'Blumenwelle', code: 0x0c, options: ['Nach rechts', 'Nach links'] },
+  { id: 'laser', label: 'Laser', code: 0x0e },
+  { id: 'circle-wave', label: 'Kreisende Welle', code: 0x0f, options: ['Gegen den Uhrzeigersinn', 'Im Uhrzeigersinn'] },
+  { id: 'cross', label: 'Farbkreuz', code: 0x10 },
+  { id: 'snowfall', label: 'Schneefall', code: 0x11 },
+  { id: 'meteor', label: 'Meteor', code: 0x12 },
+  { id: 'static', label: 'Immer an', code: 0x01 },
+  { id: 'breathing', label: 'Dynamisches Atmen', code: 0x02 },
+  { id: 'spectrum', label: 'Spektrum-Zyklus', code: 0x03 },
+];
+
+export const COLOR_MODE_SINGLE = 0x07;
+export const COLOR_MODE_RAINBOW = 0x08;
+
+/**
+ * Bytes 1..7 der Licht-Antwort: Effekt, Tempo, Helligkeit, Option<<4 | Farbmodus, R, G, B.
+ * `speed` ist der Rohwert: 0 = schnell, 4 = langsam (GearHub schreibt MAXSPEED − Tempo).
+ */
 export interface LedState {
   raw: number[];
   mode: number;
+  speed: number;
   brightness: number;
+  /** unteres Halbbyte von Byte 4 */
+  colorMode: number;
+  /** oberes Halbbyte von Byte 4: Richtung/Muster */
+  option: number;
   color: string;
 }
 
@@ -59,10 +95,59 @@ const hex2 = (n: number) => n.toString(16).padStart(2, '0');
 
 export function decodeLed(res: ArrayLike<number>): LedState {
   const raw = Array.from({ length: 7 }, (_, i) => res[i + 1] ?? 0);
-  return { raw, mode: raw[0], brightness: raw[2], color: `#${hex2(raw[4])}${hex2(raw[5])}${hex2(raw[6])}` };
+  return {
+    raw,
+    mode: raw[0],
+    speed: raw[1],
+    brightness: raw[2],
+    colorMode: raw[3] & 0x0f,
+    option: raw[3] >> 4,
+    color: `#${hex2(raw[4])}${hex2(raw[5])}${hex2(raw[6])}`,
+  };
 }
 
 export const BRIGHTNESS_MAX = 4;
+export const SPEED_MAX = 4;
+
+/** App-Tempo (0 = langsam … 4 = schnell) ↔ Rohwert im Gerät (umgekehrt). */
+export const speedToRaw = (speed: number) => SPEED_MAX - speed;
+export const rawToSpeed = (raw: number) => SPEED_MAX - Math.min(SPEED_MAX, raw);
+
+export interface LedWrite {
+  /** Effektcode; nur Werte aus LED_EFFECTS oder der zuvor vom Gerät gelesene Code */
+  mode: number;
+  /** Rohwert (0 = schnell) */
+  speed: number;
+  brightness: number;
+  rainbow: boolean;
+  color: string;
+  /** Richtung/Muster-Index (nur bei Effekten mit `options`), Standard 0 */
+  option?: number;
+}
+
+function parseColor(color: string): [number, number, number] {
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(color);
+  if (!m) throw new Error(`Ungültige Farbe ${color}`);
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+const checkRange = (name: string, v: number, max: number) => {
+  if (!Number.isInteger(v) || v < 0 || v > max) throw new Error(`${name} ${v} außerhalb 0–${max}`);
+};
+
+/** Komplettes Schreibpaket fürs Tastenlicht. */
+export function ledPacket(w: LedWrite, allowedModes: number[] = LED_EFFECTS.map((e) => e.code)): Uint8Array {
+  if (!allowedModes.includes(w.mode)) throw new Error(`Effektcode 0x${hex2(w.mode)} ist nicht freigegeben`);
+  checkRange('Tempo', w.speed, SPEED_MAX);
+  checkRange('Helligkeit', w.brightness, BRIGHTNESS_MAX);
+  const option = w.option ?? 0;
+  const optionCount = LED_EFFECTS.find((e) => e.code === w.mode)?.options?.length ?? 1;
+  checkRange('Option', option, optionCount - 1);
+  // Wie GearHub: reines Weiß wird als #fafffa geschickt.
+  const [r, g, b] = parseColor(w.color.toLowerCase() === '#ffffff' ? '#fafffa' : w.color);
+  const colorByte = (option << 4) | (w.rainbow ? COLOR_MODE_RAINBOW : COLOR_MODE_SINGLE);
+  return makePacket([CMD.SET_LED, w.mode, w.speed, w.brightness, colorByte, r, g, b], 8);
+}
 
 /** Schreibpaket fürs Tastenlicht: übernimmt alle gelesenen Bytes und ändert nur die Helligkeit. */
 export function ledBrightnessPacket(raw: number[], brightness: number): Uint8Array {

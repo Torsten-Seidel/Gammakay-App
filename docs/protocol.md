@@ -53,8 +53,77 @@ READ 87 04 02 04 08 b4 b4 b4      (vorher)
 - Licht-Layout (Byte 1..7): `Modus=04`, `?=02` (Tempo?), **`Helligkeit=03`** (bestätigt, Skala 0–4), `?=08` (Richtung/Option?), `R G B = b4 b4 b4`.
 - Danach meldet das Gerät auf Input #5: `0f 01` und ~30 ms später `0f 00` → vermutlich „speichert“ / „fertig“.
 
+## Farbe (Mitschnitt 3: auf Rot)
+
+```
+SET 07 04 02 04 07 b4 b4 b4 cb   ← Byte 4: 08 → 07
+SET 07 04 02 04 07 ff 00 00 e8   ← Farbe Rot
+```
+
+- **Byte 5..7 = R, G, B** (bestätigt).
+- Byte 4 wechselt vor dem Farbwechsel von `08` auf `07` → vermutlich Farbmodus:
+  `07` = eigene Farbe, `08` = bunt/„Glanz“ (Hypothese).
+- Prüfsummen in Byte 8 stimmen für beide Pakete.
+
+## Tempo (Mitschnitt 4)
+
+```
+SET 07 0b 02 04 08 fa ff fa ec   Tempo 2
+SET 07 0b 01 04 08 fa ff fa ed   Tempo 1
+```
+
+- **Byte 2 = Tempo** (bestätigt).
+
+Hinweis: GearHub hat einen „IOT-Modus“ (localStorage `IOTSwitch`), der statt WebHID einen lokalen Dienst
+(`iot_manager_rs.exe`, 127.0.0.1:6015) nutzt – dann sieht der Logger nichts. Für Mitschnitte `IOTSwitch` auf `false`.
+
+## Effekte (Mitschnitt 5: alle Effekte der Reihe nach)
+
+Licht-Paket komplett: `07 | Effekt | Tempo | Helligkeit | Farbmodus | R | G | B | Prüfsumme`
+
+| Code | Effekt (GearHub) | | Code | Effekt (GearHub) |
+|---|---|---|---|---|
+| `01` | Immer an | | `0b` | Kaleidoskop |
+| `02` | Dynamisches Atmen | | `0c` | Blumenwelle |
+| `03` | Spektrum-Zyklus | | `0d` | Benutzerdefiniert (`LightUserPicture`) |
+| `04` | Welle | | `0e` | Laser |
+| `05` | Ripple | | `0f` | Kreisende Welle |
+| `06` | Sternenlicht | | `10` | Farbkreuz |
+| `07` | Strom | | `11` | Schneefall |
+| `08` | Schatten | | `12` | Meteor |
+| `09` | Berg Welle | | `13` | Schneespur |
+| `0a` | Sinuswelle | | | |
+
+- Benutzerdefiniert (pro Taste) und Musik Modus nicht mitgeschnitten (Musik Modus braucht IOT).
+- **Byte 4 = Option << 4 | Farbmodus**: unteres Halbbyte `7` = eine Farbe, `8` = bunt („Glanz“);
+  oberes Halbbyte = Richtung/Muster (siehe unten). Bei `0d` stand `00`.
+
+### Aus dem GearHub-Treiber (`setLightSetting`, Effektliste der TK75)
+
+- Effektliste (Code = Index): 0 Off, 1 AlwaysOn, 2 Breath, 3 Neon, 4 Wave, 5 Ripple, 6 Raindrop, 7 Snake,
+  8 PressAction, 9 Converage, 10 SineWave, 11 Kaleidoscope, 12 LineWave, 13 UserPicture, 14 Laser,
+  15 CircleWave, 16 Dazzing, 17 RainDown, 18 Meteor, 19 PressActionOff, 20 MusicFollow3, 21 ScreenColor
+  (Lichtschatten), 22 MusicFollow2, …
+- **Tempo ist umgekehrt**: Byte 2 = `MAXSPEED (4) − Tempo` → Rohwert 0 = schnellste Stufe. Die App
+  rechnet das im Treiber um (`speedToRaw` / `rawToSpeed`).
+- Optionen (Index im oberen Halbbyte von Byte 4):
+
+  | Effekt | 0 | 1 | 2 | 3 |
+  |---|---|---|---|---|
+  | Welle `04` | nach rechts | nach links | nach unten | nach oben |
+  | Strom `07` | Zickzack | Spirale | | |
+  | Kaleidoskop `0b` | nach außen | nach innen | | |
+  | Blumenwelle `0c` | nach rechts | nach links | | |
+  | Kreisende Welle `0f` | gegen den Uhrzeigersinn | im Uhrzeigersinn | | |
+
+- Weiß `#ffffff` schickt GearHub als `#fafffa` (16449530).
+- Test Meteor mit Option 1 (`07 12 02 04 18 …`): Die Tastatur speichert den Wert, der Meteor läuft aber
+  weiter von links nach rechts. Effekte ohne `options` beachten die Richtung also nicht.
+- GearHub merkt sich Tempo/Farbe je Effekt und schickt sie beim Effektwechsel mit.
+- Alle Prüfsummen (Byte 8) stimmen.
+
 ## Offen / nächste Mitschnitte
 
-1. Farbe ändern → Lage der RGB-Bytes bestätigen.
-2. Tempo und Effekt ändern → Byte 2 und Byte 1 (Modusnummern).
+1. Seitenlicht (`08`/`88`) ändern.
+2. Polling-Rate, Energiespar-Zeiten.
 3. Polling-Rate ändern → bestätigt `83`/`03`?

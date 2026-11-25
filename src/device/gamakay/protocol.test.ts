@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, makePacket, readPacket,
+  checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
+  speedToRaw,
 } from './protocol.ts';
 
 const bytes = (s: string) => s.trim().split(/\s+/).map((h) => parseInt(h, 16));
@@ -39,6 +40,56 @@ test('Helligkeit außerhalb 0–4 wird abgelehnt', () => {
   const raw = decodeLed(bytes('87 04 02 04 08 b4 b4 b4')).raw;
   assert.throws(() => ledBrightnessPacket(raw, 5));
   assert.throws(() => ledBrightnessPacket(raw, -1));
+});
+
+test('Komplette Licht-Pakete entsprechen den GearHub-Mitschnitten', () => {
+  const cases: [Parameters<typeof ledPacket>[0], string][] = [
+    [{ mode: 0x04, speed: 2, brightness: 4, rainbow: false, color: '#ff0000' }, '07 04 02 04 07 ff 00 00 e8'],
+    [{ mode: 0x04, speed: 1, brightness: 4, rainbow: true, color: '#ff0000' }, '07 04 01 04 08 ff 00 00 e8'],
+    [{ mode: 0x05, speed: 2, brightness: 4, rainbow: false, color: '#ff0000' }, '07 05 02 04 07 ff 00 00 e7'],
+    [{ mode: 0x0b, speed: 1, brightness: 4, rainbow: true, color: '#faffFA' }, '07 0b 01 04 08 fa ff fa ed'],
+    [{ mode: 0x13, speed: 2, brightness: 4, rainbow: true, color: '#faffFA' }, '07 13 02 04 08 fa ff fa e4'],
+    [{ mode: 0x01, speed: 4, brightness: 4, rainbow: true, color: '#faffFA' }, '07 01 04 04 08 fa ff fa f4'],
+  ];
+  for (const [input, expected] of cases) {
+    assert.deepEqual(Array.from(ledPacket(input).slice(0, 9)), bytes(expected), expected);
+  }
+});
+
+test('Licht-Paket lehnt unbekannte Effekte und Werte ab', () => {
+  const ok = { mode: 0x04, speed: 2, brightness: 4, rainbow: false, color: '#ff0000' };
+  assert.throws(() => ledPacket({ ...ok, mode: 0x0d }));
+  assert.throws(() => ledPacket({ ...ok, mode: 0x0d }, [0x04]));
+  assert.doesNotThrow(() => ledPacket({ ...ok, mode: 0x0d }, [0x0d]));
+  assert.throws(() => ledPacket({ ...ok, speed: 5 }));
+  assert.throws(() => ledPacket({ ...ok, color: 'rot' }));
+});
+
+test('Licht-Antwort wird vollständig dekodiert', () => {
+  const led = decodeLed(bytes('87 0b 02 04 08 fa ff fa'));
+  assert.deepEqual(
+    { ...led, raw: undefined },
+    { raw: undefined, mode: 0x0b, speed: 2, brightness: 4, colorMode: 8, option: 0, color: '#faffFA'.toLowerCase() },
+  );
+  // Option im oberen Halbbyte (GearHub: option << 4 | Farbmodus)
+  const dir = decodeLed(bytes('87 04 02 04 38 ff 00 00'));
+  assert.equal(dir.option, 3);
+  assert.equal(dir.colorMode, 8);
+});
+
+test('Richtungsoption landet im oberen Halbbyte von Byte 4', () => {
+  const base = { mode: 0x04, speed: 2, brightness: 4, rainbow: true, color: '#ff0000' };
+  assert.equal(ledPacket({ ...base, option: 0 })[4], 0x08);
+  assert.equal(ledPacket({ ...base, option: 3 })[4], 0x38); // Welle „nach oben“
+  assert.equal(ledPacket({ ...base, rainbow: false, option: 1 })[4], 0x17);
+  assert.throws(() => ledPacket({ ...base, option: 4 })); // Welle hat nur 4 Richtungen
+  assert.throws(() => ledPacket({ ...base, mode: 0x05, option: 1 })); // Ripple hat keine Optionen
+});
+
+test('Tempo wird wie in GearHub umgekehrt übertragen', () => {
+  assert.equal(speedToRaw(4), 0);
+  assert.equal(speedToRaw(0), 4);
+  assert.equal(rawToSpeed(1), 3);
 });
 
 test('Energiespar-Zeiten und Geräteinfo werden dekodiert', () => {

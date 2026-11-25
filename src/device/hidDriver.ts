@@ -3,10 +3,14 @@ import { TK75_CAPABILITIES } from './driver';
 import { log } from './log';
 import { createDefaultConfig, type ConfigSection, type DeviceConfig } from './model';
 import {
-  CMD, CONFIG_USAGE, CONFIG_USAGE_PAGE, TK75_PRODUCT_ID, TK75_VENDOR_ID,
-  decodeInfoName, decodeLed, decodeSleep, decodeVersion, ledBrightnessPacket, type LedState,
+  CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, TK75_PRODUCT_ID, TK75_VENDOR_ID,
+  rawToSpeed, speedToRaw,
+  decodeInfoName, decodeLed, decodeSleep, decodeVersion, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { GamakayTransport } from './gamakay/transport';
+
+const deviceEffectId = (code: number) => `device-0x${code.toString(16).padStart(2, '0')}`;
+const effectIdFor = (code: number) => LED_EFFECTS.find((e) => e.code === code)?.id ?? deviceEffectId(code);
 
 const isConfigInterface = (d: HIDDevice) =>
   d.vendorId === TK75_VENDOR_ID &&
@@ -16,8 +20,8 @@ const isConfigInterface = (d: HIDDevice) =>
 /**
  * Treiber für die echte TK75 über WebHID (Feature-Report 0).
  * Lesen: Geräteinfo, Tastenlicht, Seitenlicht, Energiespar-Zeiten.
- * Schreiben: bisher NUR die Helligkeit des Tastenlichts – alles andere ist gesperrt,
- * bis der jeweilige Befehl per Mitschnitt bestätigt ist.
+ * Schreiben: bisher NUR das Tastenlicht (Effekt, Tempo, Helligkeit, Farbe/bunt) – alles andere
+ * ist gesperrt, bis der jeweilige Befehl per Mitschnitt bestätigt ist.
  */
 export class GamakayHidDriver implements KeyboardDriver {
   readonly capabilities = TK75_CAPABILITIES;
@@ -64,10 +68,22 @@ export class GamakayHidDriver implements KeyboardDriver {
 
     // Profil-/Tastendaten sind noch nicht entschlüsselt → nur Licht und Energiesparen aus dem Gerät.
     for (const p of cfg.profiles) {
-      p.lighting.effect = 'device';
-      p.lighting.brightness = this.led.brightness;
-      p.lighting.color = this.led.color;
-      p.lighting.side = { effect: 'device', color: side.color, brightness: side.brightness };
+      p.lighting = {
+        effect: effectIdFor(this.led.mode),
+        rainbow: this.led.colorMode === COLOR_MODE_RAINBOW,
+        color: this.led.color,
+        brightness: this.led.brightness,
+        speed: rawToSpeed(this.led.speed),
+        option: this.led.option,
+        // Seitenlicht: gleiche Struktur, Effektcodes noch nicht zugeordnet → nur Anzeige.
+        side: {
+          effect: deviceEffectId(side.mode),
+          rainbow: side.colorMode === COLOR_MODE_RAINBOW,
+          color: side.color,
+          brightness: side.brightness,
+          speed: rawToSpeed(side.speed),
+        },
+      };
     }
     // Reihenfolge der vier Zeiten ist eine Annahme (Mitschnitt: 120, 120, 1680, 1680 s).
     const min = (s: number) => Math.round(s / 60);
@@ -78,7 +94,10 @@ export class GamakayHidDriver implements KeyboardDriver {
       standbyMin: min(sleep[2]),
       btSleepMin: min(sleep[3]),
     };
-    log('info', `Gelesen: Licht Modus ${this.led.mode}, Helligkeit ${this.led.brightness}, Farbe ${this.led.color}`);
+    const effectName = LED_EFFECTS.find((e) => e.code === this.led!.mode)?.label ?? `unbekannt 0x${this.led.mode.toString(16)}`;
+    log('info', `Gelesen: Licht ${effectName}, Tempo ${rawToSpeed(this.led.speed)}, Option ${this.led.option}, ` +
+      `Helligkeit ${this.led.brightness}, ` +
+      `${this.led.colorMode === COLOR_MODE_RAINBOW ? 'bunt' : `Farbe ${this.led.color}`}`);
     return cfg;
   }
 
@@ -86,13 +105,24 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
     if (!this.led) throw new Error('Licht wurde noch nicht gelesen.');
     const wanted = config.profiles[config.activeProfile].lighting;
-    if (wanted.color !== this.led.color || wanted.effect !== 'device') {
-      log('info', 'Hinweis: Effekt und Farbe werden noch nicht geschrieben – nur die Helligkeit.');
+    const mode = LED_EFFECTS.find((e) => e.id === wanted.effect)?.code;
+    if (mode === undefined) {
+      throw new Error('Der aktuelle Geräte-Effekt ist unbekannt – bitte zuerst einen Effekt aus der Liste wählen.');
     }
-    if (wanted.brightness === this.led.brightness) return;
-    await this.transport.write(ledBrightnessPacket(this.led.raw, wanted.brightness));
-    this.led = decodeLed([CMD.GET_LED, ...this.led.raw.map((b, i) => (i === 2 ? wanted.brightness : b))]);
-    log('info', `Helligkeit auf ${wanted.brightness} gesetzt`);
+    const effect = LED_EFFECTS.find((e) => e.code === mode);
+    const option = effect?.options ? Math.min(wanted.option ?? 0, effect.options.length - 1) : 0;
+    const packet = ledPacket({
+      mode,
+      speed: speedToRaw(wanted.speed),
+      brightness: wanted.brightness,
+      rainbow: wanted.rainbow,
+      color: wanted.color,
+      option,
+    });
+    await this.transport.write(packet);
+    this.led = decodeLed([CMD.GET_LED, ...packet.slice(1, 8)]);
+    log('info', `Licht geschrieben: ${effect?.label}${effect?.options ? ` (${effect.options[option]})` : ''}, Tempo ${wanted.speed}, ` +
+      `Helligkeit ${wanted.brightness}, ${wanted.rainbow ? 'bunt' : wanted.color}`);
   }
 
   async disconnect(): Promise<void> {
