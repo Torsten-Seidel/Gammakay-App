@@ -8,7 +8,7 @@ import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -33,6 +33,8 @@ const isDongleConfig = (d: HIDDevice) =>
   d.productId === TK75_DONGLE_PRODUCT_ID &&
   d.collections.some((c) => c.usagePage === CONFIG_USAGE_PAGE && c.usage === CONFIG_USAGE);
 const isConfigInterface = (d: HIDDevice) => isUsbConfig(d) || isBtConfig(d) || isDongleConfig(d);
+type SwitchChange = { key: string; to: SwitchConfig; packets: Uint8Array[] };
+/** Bis zu so vielen geänderten Tasten wird einzeln geschrieben, darüber als Sammelschreiben (ganze Tabellen). */
 const MAX_SWITCH_KEYS = 5;
 /** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 4×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
 const SWITCH_READ_OPS = 28;
@@ -121,6 +123,8 @@ export class GamakayHidDriver implements KeyboardDriver {
   /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
   private keySlots: Record<string, number> = {};
   private switchState: Record<string, KeySwitchValues & { continuousRT: boolean }> = {};
+  /** Zuletzt gelesene Rohtabellen aller 128 Plätze (Grundlage fürs Sammelschreiben). */
+  private switchTables: SwitchTables | null = null;
 
   private constructor(device: HIDDevice) {
     const transport = isBtConfig(device) ? 'bt' : isDongleConfig(device) ? 'dongle' : 'usb';
@@ -275,6 +279,14 @@ export class GamakayHidDriver implements KeyboardDriver {
     const dzBottom = await u16(MAGNETISM.deadzoneBottom, 'Totzone unten');
     const dzTop = await this.readPages((p) => magnetismReadPacket(MAGNETISM.deadzoneTop, p), 2, 'Totzone oben');
 
+    this.switchTables = {
+      modes: Array.from(modes.subarray(0, 128)),
+      travel: travel.slice(0, 128),
+      rtPress: rtPress.slice(0, 128),
+      rtRelease: rtRelease.slice(0, 128),
+      deadzoneBottom: dzBottom.slice(0, 128),
+      deadzoneTop: Array.from(dzTop.subarray(0, 128)),
+    };
     const mm = (raw: number) => Math.round((raw / TRAVEL_STEP) * 100) / 100;
     const perKey: Record<string, SwitchConfig> = {};
     this.keySlots = {};
@@ -315,8 +327,8 @@ export class GamakayHidDriver implements KeyboardDriver {
   }
 
   /**
-   * Schalterwerte schreiben: nur Tasten, die vom gelesenen Stand abweichen, einzeln (wie GearHub).
-   * Testphase: höchstens MAX_SWITCH_KEYS Tasten pro Übernehmen; Continuous RT ist noch nicht schreibbar.
+   * Schalterwerte schreiben: nur Tasten, die vom gelesenen Stand abweichen. Wenige Tasten einzeln,
+   * viele als Sammelschreiben der geänderten Tabellen (beides wie GearHub). Continuous RT ist noch nicht schreibbar.
    */
   private async writeSwitches(profile: Profile): Promise<void> {
     if (!Object.keys(this.switchState).length) throw new Error('Schalterwerte wurden noch nicht gelesen.');
@@ -327,23 +339,12 @@ export class GamakayHidDriver implements KeyboardDriver {
       return packets.length ? [{ key, to, packets }] : [];
     });
     if (!changes.length) return;
-    this.addOps(changes.reduce((n, c) => n + c.packets.length, 0) + SWITCH_READ_OPS);
+    const newModeByte = (from: KeySwitchValues, rt: boolean) =>
+      rt === from.rapidTrigger ? from.modeByte : (from.modeByte & 0x7f) | (rt ? 0x80 : 0);
     if (changes.length > MAX_SWITCH_KEYS) {
-      throw new Error(`Testphase: höchstens ${MAX_SWITCH_KEYS} Tasten auf einmal (geändert: ${changes.length}).`);
-    }
-    for (const [n, { key, to, packets }] of changes.entries()) {
-      this.progress(`Schreibe ${key} (${n + 1}/${changes.length}) …`);
-      log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, ` +
-        `RT ${to.rapidTrigger ? `an ${to.rtPress}/${to.rtRelease}` : 'aus'}, Totzone ${to.deadzoneTop}/${to.deadzoneBottom} mm`);
-      for (const p of packets) await this.transport.write(p);
-      // Nach dem Ende-Kennzeichen speichert die Tastatur; Pakete in dieser Zeit gehen verloren
-      // (getestet: bei 40 ms Abstand kamen von F9–F12 nur F9 und F12 an). GearHub wartet 100 ms je Taste.
-      await sleep(KEY_WRITE_GAP_MS);
-      const from = this.switchState[key];
-      this.switchState[key] = {
-        ...to,
-        modeByte: to.rapidTrigger === from.rapidTrigger ? from.modeByte : (from.modeByte & 0x7f) | (to.rapidTrigger ? 0x80 : 0),
-      };
+      await this.writeSwitchTables(changes, newModeByte);
+    } else {
+      await this.writeSwitchKeys(changes, newModeByte);
     }
     // GearHub wartet danach (vendorSleep, bei Sammelschreiben 500 ms); vorher liefert die Tastatur nur Echos.
     await sleep(500);
@@ -357,7 +358,55 @@ export class GamakayHidDriver implements KeyboardDriver {
       this.stepLabel = null;
     }
     const lost = changes.filter(({ key, to }) => JSON.stringify(switchFor(check, key)) !== JSON.stringify(to)).map((c) => c.key);
-    if (lost.length) throw new Error(`Nicht von der Tastatur übernommen: ${lost.join(', ')} – bitte erneut „Übernehmen“.`);
+    if (lost.length) {
+      const list = lost.length > 8 ? `${lost.slice(0, 8).join(', ')} und ${lost.length - 8} weitere` : lost.join(', ');
+      throw new Error(`Nicht von der Tastatur übernommen: ${list} – bitte erneut „Übernehmen“.`);
+    }
+  }
+
+  /** Sammelschreiben: Kopie der gelesenen Tabellen, nur die Plätze geänderter Tasten ersetzt; unbekannte Plätze bleiben. */
+  private async writeSwitchTables(changes: SwitchChange[], newModeByte: (from: KeySwitchValues, rt: boolean) => number) {
+    const from = this.switchTables;
+    if (!from) throw new Error('Schaltertabellen wurden noch nicht gelesen.');
+    const to: SwitchTables = structuredClone(from);
+    for (const { key, to: v } of changes) {
+      const i = this.keySlots[key];
+      to.modes[i] = newModeByte(this.switchState[key], v.rapidTrigger);
+      to.travel[i] = mmToRaw(v.actuation);
+      to.rtPress[i] = mmToRaw(v.rtPress);
+      to.rtRelease[i] = mmToRaw(v.rtRelease);
+      to.deadzoneBottom[i] = mmToRaw(v.deadzoneBottom);
+      to.deadzoneTop[i] = mmToRaw(v.deadzoneTop);
+    }
+    const tables = bulkSwitchPackets(from, to);
+    const total = tables.reduce((n, t) => n + t.packets.length, 0);
+    this.addOps(total + SWITCH_READ_OPS);
+    log('info', `Sammelschreiben: ${changes.length} Tasten, Tabellen ${tables.map((t) => t.kind).join(', ')} (${total} Pakete)`);
+    let sent = 0;
+    for (const { packets } of tables) {
+      for (const p of packets) {
+        this.progress(`Schreibe alle Tasten (Teil ${++sent}/${total}) …`);
+        await this.transport.write(p);
+      }
+      await sleep(KEY_WRITE_GAP_MS);
+    }
+    for (const { key, to: v } of changes) this.switchState[key] = { ...v, modeByte: newModeByte(this.switchState[key], v.rapidTrigger) };
+    this.switchTables = to;
+  }
+
+  /** Einzelschreiben je Taste (65 … 00 <Platz>). */
+  private async writeSwitchKeys(changes: SwitchChange[], newModeByte: (from: KeySwitchValues, rt: boolean) => number) {
+    this.addOps(changes.reduce((n, c) => n + c.packets.length, 0) + SWITCH_READ_OPS);
+    for (const [n, { key, to, packets }] of changes.entries()) {
+      this.progress(`Schreibe ${key} (${n + 1}/${changes.length}) …`);
+      log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, ` +
+        `RT ${to.rapidTrigger ? `an ${to.rtPress}/${to.rtRelease}` : 'aus'}, Totzone ${to.deadzoneTop}/${to.deadzoneBottom} mm`);
+      for (const p of packets) await this.transport.write(p);
+      // Nach dem Ende-Kennzeichen speichert die Tastatur; Pakete in dieser Zeit gehen verloren
+      // (getestet: bei 40 ms Abstand kamen von F9–F12 nur F9 und F12 an). GearHub wartet 100 ms je Taste.
+      await sleep(KEY_WRITE_GAP_MS);
+      this.switchState[key] = { ...to, modeByte: newModeByte(this.switchState[key], to.rapidTrigger) };
+    }
   }
 
   async writeSection(section: ConfigSection, config: DeviceConfig): Promise<void> {

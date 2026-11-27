@@ -231,9 +231,18 @@ Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten
 - Direkt nach dem Schreiben antwortet sie einige 100 ms lang nur mit dem Echo der Anfrage → 500 ms warten.
   Achtung: `83` bei 8000 Hz sieht genauso aus wie ein Echo (lauter Nullen).
 - Über alle drei Wege geprüft (F12: 1,5 mm + RT 0,1/0,1 und zurück): Kabel ~1 s, Bluetooth ~2,1 s, Empfänger ~6 s je Übernehmen inkl. Kontroll-Lesen.
-- Sammelschreiben (`65 <Art> 01 <Seite> <Ende>` + 56 Byte je Seite) ist noch nicht genutzt; die App erlaubt bis 5 Tasten pro Übernehmen.
+
+## Magnetschalter schreiben, alle Tasten (Sammelschreiben, 2026-11-27, alle drei Wege geprüft)
+
+`65 <Art> 01 <Seite> <Ende> 00 00 <Prüfsumme>` + 56 Byte der ganzen Tabelle (alle 128 Plätze) je Seite. Wie GearHub
+(`setMultiMagnetismInfo`): u16-Tabellen (256 Byte) = 5 Seiten, Art 7 und fb (128 Byte) = 3 Seiten.
+Reihenfolge Art 7, 0, 2, 3, 6, fb; nur das **allerletzte** Paket der ganzen Folge hat Ende = 1, danach 500 ms warten.
+
+- Die App nutzt es ab 6 geänderten Tasten und schickt nur Tabellen, die sich ändern. Grundlage ist die zuletzt gelesene
+  Tabelle, Plätze ohne bekannte Taste (z. B. Drehknopf) bleiben unverändert.
+- Geprüft: alle 82 Tasten 2,00 → 1,80 → 2,00 mm (je 5 Pakete) inkl. Kontroll-Lesen: Kabel ~2,5 s, Bluetooth ~2,2 s, Empfänger ~6,2 s.
 
 ## Offen / nächste Mitschnitte
 
-1. Auslösepunkt/RT schreiben (`65`), Rückstellpunkt (Art 1), Continuous RT.
+1. Sammelschreiben mit RT/Totzonen prüfen; Rückstellpunkt (Art 1), Continuous RT.
 2. Tastenbelegung schreiben (`0a`).

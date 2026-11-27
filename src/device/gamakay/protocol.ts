@@ -392,6 +392,51 @@ export function keySwitchPackets(slot: number, from: KeySwitchValues, to: KeySwi
   return ops.map((op, i) => magnetismKeyPacket(op.kind, slot, i === ops.length - 1, op.data));
 }
 
+export const mmToRaw = (mm: number) => Math.round(mm * TRAVEL_STEP);
+
+/** Komplette Tabellen aller 128 Plätze (Rohwerte), wie sie `E5` liefert. */
+export interface SwitchTables {
+  modes: number[];
+  travel: number[];
+  rtPress: number[];
+  rtRelease: number[];
+  deadzoneBottom: number[];
+  deadzoneTop: number[];
+}
+
+const BULK_CHUNK = 56;
+
+/**
+ * Sammelschreiben (GearHub setMultiMagnetismInfo): je geänderter Tabelle `65 <Art> 01 <Seite> <Ende>` + 56 Byte.
+ * Reihenfolge wie GearHub: Modus, Wege (0, 2, 3, 6), obere Totzone. Nur das allerletzte Paket trägt Ende = 1.
+ */
+export function bulkSwitchPackets(from: SwitchTables, to: SwitchTables): { kind: number; packets: Uint8Array[] }[] {
+  const u16 = (v: number[]) => v.flatMap((x) => [x & 0xff, (x >> 8) & 0xff]);
+  const tables: [number, keyof SwitchTables, (v: number[]) => number[]][] = [
+    [MAGNETISM.modes, 'modes', (v) => v],
+    [MAGNETISM.travel, 'travel', u16],
+    [MAGNETISM.rtPress, 'rtPress', u16],
+    [MAGNETISM.rtRelease, 'rtRelease', u16],
+    [MAGNETISM.deadzoneBottom, 'deadzoneBottom', u16],
+    [MAGNETISM.deadzoneTop, 'deadzoneTop', (v) => v],
+  ];
+  const changed = tables.filter(([, field]) => {
+    if (to[field].length !== MATRIX_SLOTS || from[field].length !== MATRIX_SLOTS) {
+      throw new Error(`Tabelle ${field} braucht ${MATRIX_SLOTS} Einträge`);
+    }
+    return to[field].some((v, i) => v !== from[field][i]);
+  });
+  return changed.map(([kind, field, encode], t) => {
+    const bytes = encode(to[field]);
+    const pages = Math.ceil(bytes.length / BULK_CHUNK);
+    const lastTable = t === changed.length - 1;
+    const packets = Array.from({ length: pages }, (_, page) =>
+      makePacket([CMD.SET_MULTI_MAGNETISM, kind, 1, page, lastTable && page === pages - 1 ? 1 : 0], 7,
+        bytes.slice(page * BULK_CHUNK, (page + 1) * BULK_CHUNK)));
+    return { kind, packets };
+  });
+}
+
 // ---------- Energiesparen ----------
 
 /** Zeiten in Sekunden (GearHub setSleepTime/getSleepTime). */

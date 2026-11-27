@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  bulkSwitchPackets,
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
@@ -188,4 +189,20 @@ test('Schalter schreiben: keine Änderung → keine Pakete; Grenzen werden gepr�
   assert.equal(keySwitchPackets(0, BASE, { ...BASE }).length, 0);
   assert.throws(() => keySwitchPackets(0, BASE, { ...BASE, actuation: 3.9 }));
   assert.throws(() => keySwitchPackets(128, BASE, { ...BASE, actuation: 1 }));
+});
+
+test('Sammelschreiben: nur geänderte Tabellen, 5 Seiten bei u16, Ende nur am allerletzten Paket', () => {
+  const fill = (v: number) => Array(128).fill(v);
+  const from = { modes: fill(0), travel: fill(200), rtPress: fill(30), rtRelease: fill(30), deadzoneBottom: fill(30), deadzoneTop: fill(0) };
+  const to = { ...from, travel: fill(180), modes: fill(0x80) };
+  const out = bulkSwitchPackets(from, to);
+  assert.deepEqual(out.map((o) => [o.kind, o.packets.length]), [[7, 3], [0, 5]]);
+  const all = out.flatMap((o) => o.packets);
+  assert.deepEqual(all.map((p) => p[4]), [0, 0, 0, 0, 0, 0, 0, 1]);
+  assert.deepEqual([...all[3].subarray(0, 4)], [0x65, 0, 1, 0]);
+  assert.deepEqual([...all[3].subarray(8, 12)], [180, 0, 180, 0]);
+  // 256 Byte = 4 × 56 + 32 → letzte Seite nur zum Teil gefüllt
+  assert.equal(all[7][8 + 31], 0);
+  assert.equal(all[7][8 + 32], 0);
+  assert.deepEqual(bulkSwitchPackets(from, { ...from }), []);
 });
