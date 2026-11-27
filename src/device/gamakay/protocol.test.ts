@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  encodeKeyAction, decodeKeyAction, keyMatrixWritePacket, TK75_SLOTS, TK75_DEFAULT_MATRIX,
   bulkSwitchPackets,
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
@@ -215,4 +216,31 @@ test('Rückstellpunkt: Einzelpaket Art 1 nach dem Auslösepunkt, Sammelschreiben
   const from = { modes: fill(0), travel: fill(200), release: fill(200), rtPress: fill(30), rtRelease: fill(30), deadzoneBottom: fill(30), deadzoneTop: fill(0) };
   const out = bulkSwitchPackets(from, { ...from, travel: fill(150), release: fill(120) });
   assert.deepEqual(out.map((o) => [o.kind, o.packets.length]), [[0, 5], [1, 5]]);
+});
+
+test('Tastenbelegung: Werkstabelle, Kodieren/Dekodieren, Schreibpaket', () => {
+  assert.equal(TK75_SLOTS.filter(Boolean).length, 82);
+  assert.equal(TK75_SLOTS[72], 'F12');
+  assert.equal(TK75_SLOTS[65], 'Fn');
+  assert.equal(TK75_SLOTS[81], 'Backslash');
+  // ISO-#-Taste ist HID 50, nicht 49
+  assert.deepEqual(encodeKeyAction({ kind: 'key', code: 'Backslash' }, 0), [0, 0, 50, 0]);
+  assert.deepEqual(encodeKeyAction({ kind: 'default' }, 72), [0, 0, 69, 0]);
+  assert.deepEqual(encodeKeyAction({ kind: 'key', code: 'Escape' }, 3), [0, 0, 41, 0]);
+  assert.deepEqual(encodeKeyAction({ kind: 'combo', codes: ['ControlLeft', 'KeyC'] }, 3), [0, 224, 6, 0]);
+  assert.deepEqual(encodeKeyAction({ kind: 'combo', codes: ['ControlLeft', 'ShiftLeft', 'Escape'] }, 3), [0, 224, 225, 41]);
+  assert.deepEqual(encodeKeyAction({ kind: 'function', fn: 'media.mute' }, 3), [3, 0, 226, 0]);
+  assert.deepEqual(encodeKeyAction({ kind: 'disabled' }, 3), [0, 0, 0, 0]);
+  assert.throws(() => encodeKeyAction({ kind: 'macro', macroId: 'x' }, 3));
+  assert.throws(() => encodeKeyAction({ kind: 'function', fn: 'sys.displayNext' }, 3));
+  // Rückweg
+  assert.deepEqual(decodeKeyAction(TK75_DEFAULT_MATRIX[72], 72), { kind: 'default' });
+  assert.deepEqual(decodeKeyAction([0, 0, 41, 0], 3), { kind: 'key', code: 'Escape' });
+  assert.deepEqual(decodeKeyAction([0, 224, 6, 0], 3), { kind: 'combo', codes: ['ControlLeft', 'KeyC'] });
+  assert.deepEqual(decodeKeyAction([3, 0, 226, 0], 3), { kind: 'function', fn: 'media.mute' });
+  assert.deepEqual(decodeKeyAction([0, 0, 0, 0], 3), { kind: 'disabled' });
+  assert.equal(decodeKeyAction([9, 0, 1, 0], 3), null);
+  // Paket: 0a 00 48 00 00 01 00 <chk> 00 00 29 00
+  const p = keyMatrixWritePacket(0, 72, [0, 0, 41, 0]);
+  assert.deepEqual([...p.subarray(0, 12)], [0x0a, 0, 72, 0, 0, 1, 0, 0xff - ((0x0a + 72 + 1) & 0xff), 0, 0, 41, 0]);
 });

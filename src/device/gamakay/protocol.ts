@@ -37,6 +37,7 @@ export const CMD = {
   GET_REPORT_RATE: 0x83,
   SET_SLEEP: 0x11,
   GET_KEYMATRIX: 0x8a,
+  SET_KEYMATRIX: 0x0a,
   GET_MULTI_MAGNETISM: 0xe5,
   SET_MULTI_MAGNETISM: 0x65,
   SET_REPORT_RATE: 0x03,
@@ -324,6 +325,9 @@ const HID_TO_CODE: Record<number, string> = (() => {
     80: 'ArrowLeft', 81: 'ArrowDown', 82: 'ArrowUp', 100: 'IntlBackslash', 101: 'ContextMenu',
     224: 'ControlLeft', 225: 'ShiftLeft', 226: 'AltLeft', 227: 'MetaLeft', 228: 'ControlRight', 229: 'ShiftRight',
     230: 'AltRight', 231: 'MetaRight',
+    83: 'NumLock', 84: 'NumpadDivide', 85: 'NumpadMultiply', 86: 'NumpadSubtract', 87: 'NumpadAdd', 88: 'NumpadEnter',
+    89: 'Numpad1', 90: 'Numpad2', 91: 'Numpad3', 92: 'Numpad4', 93: 'Numpad5', 94: 'Numpad6', 95: 'Numpad7',
+    96: 'Numpad8', 97: 'Numpad9', 98: 'Numpad0', 99: 'NumpadDecimal',
   });
   return m;
 })();
@@ -338,6 +342,128 @@ export function decodeKeyMatrix(bytes: ArrayLike<number>): (string | undefined)[
     else slots.push(undefined);
   }
   return slots;
+}
+
+// ---------- Tastenbelegung (0A schreiben, 8A lesen) ----------
+
+/**
+ * Werks-Matrix der TK75 (Basis-Ebene, aus dem Gerät gelesen am 2026-11-27): Platz → 4 Byte.
+ * Dient als feste Zuordnung Platz ↔ physische Taste (wie GearHub `defaultMatrix`), denn die aktuelle Matrix
+ * enthält Umbelegungen. 90–92 und 96–98 gehören zum Drehknopf.
+ */
+export const TK75_DEFAULT_MATRIX: readonly (readonly number[])[] = (() => {
+  const m: number[][] = Array.from({ length: MATRIX_SLOTS }, () => [0, 0, 0, 0]);
+  const hid =
+    '0:41 1:53 2:43 3:57 4:225 5:224 6:58 7:30 8:20 9:4 10:100 11:227 12:59 13:31 14:26 15:22 16:29 17:226 ' +
+    '18:60 19:32 20:8 21:7 22:27 24:61 25:33 26:21 27:9 28:6 30:62 31:34 32:23 33:10 34:25 36:63 37:35 38:28 ' +
+    '39:11 40:5 41:44 42:64 43:36 44:24 45:13 46:17 48:65 49:37 50:12 51:14 52:16 54:66 55:38 56:18 57:15 ' +
+    '58:54 59:230 60:67 61:39 62:19 63:51 64:55 66:68 67:45 68:47 69:52 70:56 71:228 72:69 73:46 74:48 ' +
+    '76:229 77:80 78:76 79:42 80:40 81:50 82:82 83:81 85:74 86:75 87:78 89:79';
+  for (const pair of hid.split(' ')) {
+    const [slot, code] = pair.split(':').map(Number);
+    m[slot] = [0, 0, code, 0];
+  }
+  m[65] = [10, 1, 0, 0]; // Fn
+  m[90] = [3, 0, 234, 0]; // Drehknopf: leiser
+  m[91] = [3, 0, 233, 0]; // lauter
+  m[92] = [3, 0, 205, 0]; // Play/Pause (Drücken)
+  m[96] = [19, 1, 0, 0];
+  m[97] = [19, 1, 1, 0];
+  m[98] = [19, 1, 3, 0];
+  return m;
+})();
+
+/** Platz → physische Taste (fest, aus der Werks-Matrix). */
+export const TK75_SLOTS: readonly (string | undefined)[] = decodeKeyMatrix(TK75_DEFAULT_MATRIX.flat());
+
+/** KeyboardEvent.code → HID-Usage. Bei doppelter Belegung (49/50 = Backslash) gilt der Wert der Werks-Matrix. */
+const CODE_TO_HID: Record<string, number> = (() => {
+  const m: Record<string, number> = {};
+  for (const [hid, code] of Object.entries(HID_TO_CODE)) m[code] ??= Number(hid);
+  TK75_SLOTS.forEach((code, slot) => {
+    if (code && code !== 'Fn') m[code] = TK75_DEFAULT_MATRIX[slot][2];
+  });
+  return m;
+})();
+
+/** Funktionen (GearHub-Tabelle `jy`): Medien = Consumer-Usage (LE), Licht 13, Verbindung 14, Profil 8, System 10. */
+export const FUNCTION_CODES: Record<string, readonly number[]> = {
+  'media.mute': [3, 0, 226, 0],
+  'media.volDown': [3, 0, 234, 0],
+  'media.volUp': [3, 0, 233, 0],
+  'media.playPause': [3, 0, 205, 0],
+  'media.prev': [3, 0, 182, 0],
+  'media.next': [3, 0, 181, 0],
+  'light.toggle': [13, 0, 0, 0],
+  'light.nextEffect': [13, 1, 1, 0],
+  'light.brightUp': [13, 2, 1, 0],
+  'light.brightDown': [13, 2, 2, 0],
+  'light.speedUp': [13, 3, 1, 0],
+  'light.speedDown': [13, 3, 2, 0],
+  'conn.usb': [14, 0, 6, 0],
+  'conn.24g': [14, 0, 5, 0],
+  'conn.bt1': [14, 0, 0, 0],
+  'conn.bt2': [14, 0, 1, 0],
+  'conn.bt3': [14, 0, 2, 0],
+  'sys.profileNext': [8, 0, 3, 0],
+  'sys.winLock': [10, 3, 0, 0],
+};
+
+/** Belegung eines Platzes (Modell) → 4 Byte. `default` = Werksbelegung dieses Platzes. */
+export function encodeKeyAction(action: KeyActionLike, slot: number): number[] {
+  const hid = (code: string) => {
+    const h = CODE_TO_HID[code];
+    if (h === undefined) throw new Error(`Taste ${code} ist auf der TK75 nicht belegbar`);
+    return h;
+  };
+  switch (action.kind) {
+    case 'default': return [...TK75_DEFAULT_MATRIX[slot]];
+    case 'disabled': return [0, 0, 0, 0];
+    case 'key': return action.code === 'Fn' ? [10, 1, 0, 0] : [0, 0, hid(action.code), 0];
+    case 'combo': {
+      const c = action.codes.map(hid);
+      if (c.length < 1 || c.length > 3) throw new Error('Eine Kombination hat 1 bis 3 Tasten');
+      return c.length === 1 ? [0, 0, c[0], 0] : [0, c[0], c[1], c[2] ?? 0];
+    }
+    case 'function': {
+      const f = FUNCTION_CODES[action.fn];
+      if (!f) throw new Error(`Funktion ${action.fn} wird von der TK75 noch nicht unterstützt`);
+      return [...f];
+    }
+    default: throw new Error(`${action.kind} kann noch nicht auf die Tastatur geschrieben werden`);
+  }
+}
+
+/** 4 Byte → Belegung (Modell). `null` = unbekannt (wird nicht angezeigt und nicht überschrieben). */
+export function decodeKeyAction(entry: ArrayLike<number>, slot: number): KeyActionLike | null {
+  const e = Array.from(entry).slice(0, 4);
+  const same = (a: readonly number[]) => a.every((b, i) => b === e[i]);
+  if (same(TK75_DEFAULT_MATRIX[slot])) return { kind: 'default' };
+  if (same([0, 0, 0, 0])) return { kind: 'disabled' };
+  if (same([10, 1, 0, 0])) return { kind: 'key', code: 'Fn' };
+  const fn = Object.entries(FUNCTION_CODES).find(([, v]) => same(v));
+  if (fn) return { kind: 'function', fn: fn[0] };
+  if (e[0] !== 0) return null;
+  const codes = e.slice(1).filter((b) => b).map((b) => HID_TO_CODE[b]);
+  if (codes.some((c) => !c)) return null;
+  if (e[1] === 0 && e[3] === 0) return { kind: 'key', code: codes[0] };
+  return { kind: 'combo', codes };
+}
+
+/** Struktur wie KeyAction im Modell (protocol.ts bleibt importfrei). */
+export type KeyActionLike =
+  | { kind: 'default' }
+  | { kind: 'key'; code: string }
+  | { kind: 'combo'; codes: string[] }
+  | { kind: 'function'; fn: string }
+  | { kind: 'macro'; macroId: string }
+  | { kind: 'disabled' };
+
+/** `0A <Profil> <Platz> 00 00 <Ende> <Ebene> <Prüfsumme>` + 4 Byte (GearHub setKeyConfigSimple). */
+export function keyMatrixWritePacket(profile: number, slot: number, entry: number[], layer = 0): Uint8Array {
+  if (slot < 0 || slot >= MATRIX_SLOTS) throw new Error(`Ungültiger Platz ${slot}`);
+  if (entry.length !== 4) throw new Error('Eine Belegung hat 4 Byte');
+  return makePacket([CMD.SET_KEYMATRIX, profile, slot, 0, 0, 1, layer], 7, entry);
 }
 
 /** Schalterwerte einer Taste in mm (strukturgleich mit SwitchConfig im Modell) + rohes Modusbyte. */

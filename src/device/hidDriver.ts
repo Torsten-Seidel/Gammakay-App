@@ -2,13 +2,13 @@ import type { KeyboardDriver } from './driver';
 import { TK75_CAPABILITIES } from './driver';
 import { log, toHex } from './log';
 import {
-  createDefaultConfig, switchFor, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Profile, type SwitchConfig,
+  createDefaultConfig, switchFor, actionFor, type KeyAction, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Profile, type SwitchConfig,
 } from './model';
 import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -39,7 +39,9 @@ const MAX_SWITCH_KEYS = 5;
 /** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 5×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
 const SWITCH_READ_OPS = 32;
 const READ_OPS = 6 + SWITCH_READ_OPS;
-const SECTION_LABEL: Partial<Record<ConfigSection, string>> = { lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter' };
+const SECTION_LABEL: Partial<Record<ConfigSection, string>> = {
+  lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter', keymap: 'Tastenbelegung',
+};
 const KEY_WRITE_GAP_MS = 150;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 GHz' } as const;
@@ -54,7 +56,7 @@ const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 G
 export class GamakayHidDriver implements KeyboardDriver {
   readonly capabilities = TK75_CAPABILITIES;
   readonly supports = { read: true, write: true };
-  readonly writableSections: ConfigSection[] = ['lighting', 'settings', 'switches'];
+  readonly writableSections: ConfigSection[] = ['lighting', 'settings', 'switches', 'keymap'];
   readonly info: { name: string; transport: 'usb' | 'bt' | 'dongle'; vendorId: number; productId: number; firmware?: string };
   private readonly transport: Transport;
   /** Eigene Seitenlicht-Einstellung, solange die Akkuanzeige das Seitenlicht überlagert */
@@ -122,6 +124,9 @@ export class GamakayHidDriver implements KeyboardDriver {
   }
   /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
   private keySlots: Record<string, number> = {};
+  /** Zuletzt gelesene Basis-Belegung je Platz (4 Byte) und daraus gelesene Aktion je Taste (Vergleichsstand). */
+  private keymapRaw: number[][] = [];
+  private keymapRead: Record<string, KeyAction> = {};
   private switchState: Record<string, KeySwitchValues> = {};
   /** Zuletzt gelesene Rohtabellen aller 128 Plätze (Grundlage fürs Sammelschreiben). */
   private switchTables: SwitchTables | null = null;
@@ -264,12 +269,34 @@ export class GamakayHidDriver implements KeyboardDriver {
     return out;
   }
 
-  /** Tastenzuordnung (8A) + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
-  private async readSwitches(profile: Profile): Promise<void> {
-    this.progress('Lese Tastenzuordnung …');
+  /**
+   * Basis-Belegung (8A) lesen. Die Plätze sind fest (Werks-Matrix); abweichende Einträge werden zu Aktionen.
+   * Unbekannte Einträge (z. B. Makros aus GearHub) bleiben „Standard“ im Modell und werden nicht überschrieben.
+   */
+  private async readKeymap(profile: Profile): Promise<void> {
+    this.progress('Lese Tastenbelegung …');
     const matrix = await this.readPages((p) => keyMatrixReadPacket(0, p), 8, 'Matrix');
+    this.keymapRaw = Array.from({ length: 128 }, (_, i) => Array.from(matrix.subarray(i * 4, i * 4 + 4)));
+    this.keymapRead = {};
+    const base: Record<string, KeyAction> = {};
+    const unknown: string[] = [];
+    TK75_SLOTS.forEach((key, slot) => {
+      if (!key) return;
+      const action = decodeKeyAction(this.keymapRaw[slot], slot) as KeyAction | null;
+      if (!action) unknown.push(`${key}: ${toHex(Uint8Array.from(this.keymapRaw[slot]), 4)}`);
+      this.keymapRead[key] = action ?? { kind: 'default' };
+      if (action && action.kind !== 'default') base[key] = action;
+    });
+    profile.keymap = { ...profile.keymap, base };
+    log('info', `Gelesen: Tastenbelegung, ${Object.keys(base).length} Tasten umbelegt${Object.keys(base).length ? `: ${Object.keys(base).join(', ')}` : ''}`);
+    if (unknown.length) log('info', `Unbekannte Belegungen (bleiben unverändert): ${unknown.join(' | ')}`);
+  }
+
+  /** Tastenbelegung + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
+  private async readSwitches(profile: Profile): Promise<void> {
+    await this.readKeymap(profile);
     this.progress('Lese Schalterwerte …');
-    const slots = decodeKeyMatrix(matrix);
+    const slots = TK75_SLOTS;
     const u16 = async (kind: number, label: string) =>
       decodeU16List(await this.readPages((p) => magnetismReadPacket(kind, p), 4, label));
     const modes = await this.readPages((p) => magnetismReadPacket(MAGNETISM.modes, p), 2, 'Tastenmodus');
@@ -320,12 +347,39 @@ export class GamakayHidDriver implements KeyboardDriver {
     log('info', `Gelesen: ${Object.keys(perKey).length} Tasten, Standard Auslösepunkt ${d.actuation} mm, Rückstellpunkt ${d.releasePoint} mm, ` +
       `RT ${d.rapidTrigger ? `an (${d.rtPress}/${d.rtRelease} mm)` : 'aus'}, Totzone ${d.deadzoneTop}/${d.deadzoneBottom} mm, ` +
       `${Object.keys(profile.switches).length} Tasten abweichend: ${Object.keys(profile.switches).slice(0, 8).join(', ')}`);
-    // Leere Plätze (00 00 00 00) sind Lücken in der Matrix; nur belegte, aber unbekannte Einträge melden.
-    const unknown = slots.flatMap((k, i) => {
-      const entry = matrix.subarray(i * 4, i * 4 + 4);
-      return !k && entry.some((b) => b) ? [`${i}: ${toHex(entry, 4)}`] : [];
+  }
+
+  /** Basis-Belegung schreiben: nur Tasten, deren Aktion sich gegenüber dem gelesenen Stand geändert hat (wie GearHub einzeln). */
+  private async writeKeymap(profile: Profile): Promise<void> {
+    if (!this.keymapRaw.length) throw new Error('Tastenbelegung wurde noch nicht gelesen.');
+    if (Object.keys(profile.keymap.fn).length) throw new Error('Die Fn-Ebene kann noch nicht geschrieben werden.');
+    const changes = TK75_SLOTS.flatMap((key, slot) => {
+      if (!key) return [];
+      const to = actionFor(profile, 'base', key);
+      if (JSON.stringify(to) === JSON.stringify(this.keymapRead[key] ?? { kind: 'default' })) return [];
+      if (key === 'Fn') throw new Error('Die Fn-Taste kann nicht umbelegt werden (sonst ist die Fn-Ebene nicht mehr erreichbar).');
+      const entry = encodeKeyAction(to, slot);
+      return [{ key, slot, to, entry }];
     });
-    if (unknown.length) log('info', `Belegte Plätze ohne bekannte Taste: ${unknown.join(' | ')}`);
+    if (!changes.length) return;
+    this.addOps(changes.length + 8);
+    for (const [n, { key, slot, to, entry }] of changes.entries()) {
+      this.progress(`Belege ${key} (${n + 1}/${changes.length}) …`);
+      log('info', `Belege ${key} (Platz ${slot}): ${JSON.stringify(to)} → ${toHex(Uint8Array.from(entry), 4)}`);
+      await this.transport.write(keyMatrixWritePacket(0, slot, entry));
+      await sleep(KEY_WRITE_GAP_MS); // GearHub: vendorSleep (100 ms) nach jeder Taste
+    }
+    await sleep(500);
+    this.progress('Prüfe, ob alles angekommen ist …');
+    const check = structuredClone(profile);
+    this.stepLabel = 'Prüfe, ob alles angekommen ist …';
+    try {
+      await this.readKeymap(check);
+    } finally {
+      this.stepLabel = null;
+    }
+    const lost = changes.filter(({ key, to }) => JSON.stringify(actionFor(check, 'base', key)) !== JSON.stringify(to)).map((c) => c.key);
+    if (lost.length) throw new Error(`Belegung nicht übernommen: ${lost.join(', ')} – bitte erneut „Übernehmen“.`);
   }
 
   /**
@@ -426,6 +480,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     this.progress(`Schreibe ${SECTION_LABEL[section] ?? section} …`);
     if (section === 'settings') return this.writeSettings(config.settings);
     if (section === 'switches') return this.writeSwitches(config.profiles[config.activeProfile]);
+    if (section === 'keymap') return this.writeKeymap(config.profiles[config.activeProfile]);
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
     if (!this.led || !this.side) throw new Error('Licht wurde noch nicht gelesen.');
     const wanted = config.profiles[config.activeProfile].lighting;

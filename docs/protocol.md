@@ -257,6 +257,20 @@ Reihenfolge Art 7, 0, 2, 3, 6, fb; nur das **allerletzte** Paket der ganzen Folg
 - „Continuous RT“ gibt es bei der TK75 nicht getrennt: GearHub nennt den normalen RT-Schalter (Bit 7 im Modusbyte)
   „Full Travel Continuous Rapid Trigger“ (`getIs全程连续快速触发RT` = `RT开启`).
 
+## Tastenbelegung schreiben (0A, Basis-Ebene, 2026-11-27, alle drei Wege geprüft)
+
+`0a <Profil> <Platz> 00 00 <Ende=1> <Ebene> <Prüfsumme über 0–6>` + 4 Byte Belegung ab Byte 8 (GearHub `setKeyConfigSimple`,
+danach vendorSleep 100 ms; die App wartet 150 ms und liest die Matrix zur Kontrolle nach).
+
+- Belegung (GearHub `configToMatrix`): Taste `00 00 <HID> 00`, Kombination `00 <HID1> <HID2> <HID3>` (auch Modifier als HID,
+  z. B. Strg+Leertaste `00 e0 2c 00`), aus `00 00 00 00`, Fn `0a 01 00 00`, Makro `09 <Art> <Nr> 00`.
+- Funktionen (Tabelle `jy`): Medien `03 00 <Consumer-Usage LE>` (Stumm e2, Leiser ea, Lauter e9, Play cd, Zurück b6, Weiter b5),
+  Licht `0d …` (an/aus 0d 00, Effekt+ 0d 01 01, Helligkeit ± 0d 02 01/02, Tempo ± 0d 03 01/02),
+  Verbindung `0e 00 <x>` (BT1–5 = 0–4, 2,4 GHz 5, Kabel 6), Profil+ Schleife `08 00 03`, Win-Sperre `0a 03`.
+- Plätze sind fest (Werks-Matrix, in `TK75_DEFAULT_MATRIX`); die gelesene Matrix enthält Umbelegungen und taugt nicht zur Zuordnung.
+  ISO-#-Taste = HID 50 (`Backslash`). Drehknopf: Plätze 90–92 (`03 00 ea/e9/cd`) und 96–98 (`13 01 00/01/03`).
+- Geprüft: F12 → Stumm → F11 → Werk inkl. Kontroll-Lesen: Kabel ~2,0 s, Bluetooth ~2,3 s, Empfänger ~4,7 s.
+
 ## Offen / nächste Mitschnitte
 
-1. Tastenbelegung schreiben (`0a`).
+1. Fn-Ebene schreiben (GearHub `setFnKeyConfigSimple`), Makros (`09`), Drehknopf-Belegung.
