@@ -293,6 +293,32 @@ danach vendorSleep 100 ms; die App wartet 150 ms und liest die Matrix zur Kontro
   geschrieben wie jede Taste (`0a` bzw. `10` für Fn). In der App `KnobLeft`/`KnobRight`/`KnobPress`, ohne Magnetschalter.
 - Geprüft: Drücken → Stumm → F11 → Werk inkl. Kontroll-Lesen: Kabel ~2,3 s, Bluetooth ~2,5 s, Empfänger ~6,1 s.
 
+## Makros (aus dem GearHub-Treiber, `getMacro`/`_setMacro`/`buffToMacroEvents`/`macroEventToByte`)
+
+Lesen am Gerät bestätigt (2026-11-28, Empfänger): Platz 0 = `05 00 04 9e 04 1e 05 9e …` (5×, A/B/C/Leertaste je 30 ms),
+Platz 1 = `05 00 1e 81 1e 01 …` (5×, 1/2/3/Leertaste je 1 ms), beide keiner Taste zugewiesen (Reste aus GearHub).
+Leerer Platz liest `00 …` (Platz 2) oder `ff …` (Platz 49, nie beschrieben).
+Schreiben bestätigt (Empfänger): Platz 2 = „ab“ (`01 00 04 9e 04 1e 05 9e 05 1e`, 1 Paket) + F12 = `09 00 02 00`
+inkl. Kontroll-Lesen ~7 s; F12 tippte „ab“. Danach F12 auf Werk (~6 s).
+Ebenso per Kabel (~3 s / ~2,3 s) und Bluetooth (~3 s / ~2,1 s) geprüft; F12 tippte jeweils „ab“.
+Einen Löschbefehl gibt es nicht; Platz 2 danach mit `0b 02 00 38 01` + 56 Nullbytes geleert (liest wieder `00 …`).
+
+- 50 Speicherplätze (GearHub `maxMacro`). Eine Taste löst ein Makro über die Belegung `09 <Art> <Platz> 00` aus
+  (Basis `0a` oder Fn `10`). **Art steht in der Belegung, nicht im Makro:** 0 = Anzahl (`repeat_times`),
+  1 = Start/Stopp per Tastendruck (`on_off`), 2 = solange gedrückt (`touch_repeat`).
+- Lesen `8b <Platz> <Seite>` (Prüfsumme Byte 7), bis zu 4 Seiten à 64 Byte reine Daten; GearHub hört nach der ersten
+  Seite auf, die vier Nullbytes am Stück enthält.
+- Schreiben `0b <Platz> <Seite> 38 <Ende> 00 00 <Prüfsumme>` + 56 Byte; Ende = 1 nur auf der letzten Seite, danach
+  vendorSleep. GearHub schickt nur Seiten mit Inhalt; die App schickt bis einschließlich der Nullbytes nach dem letzten
+  Ereignis, damit Reste eines längeren alten Makros nicht weiterlaufen.
+- Daten (max. 256 Byte): `<Anzahl u16 LE>`, dann je Ereignis mit der Pause **danach**:
+  `<HID> <Bit 7 = gedrückt | Pause 1–127 ms>` oder ab 128 ms `<HID> <Bit 7> <Pause u16 LE>`.
+  HID 04–ef Tastatur, f0–f4 Maustasten (links, rechts, Mitte, zurück, vor), `f9 <Pause|0> <dx> <dy> [Pause u16]` Mausbewegung.
+  Pause 0 ist nicht darstellbar (würde als lange Form gelesen) → die App schreibt mindestens 1 ms.
+- GearHub verlangt Ereignis/Pause im Wechsel; Plätze vergibt es beim Belegen (kleinster freier Platz).
+  Die App merkt sich Makronamen je Platz im localStorage (`tk75.macroNames`) und liest beim Verbinden die belegten
+  und die selbst angelegten Plätze.
+
 ## Offen / nächste Mitschnitte
 
-1. Makros (`09`); Drehknopf-Plätze 96–98 (`13 01 00/01/03`) und Fn+Knopf (`13 03`, Display) entschlüsseln.
+1. Drehknopf-Plätze 96–98 (`13 01 00/01/03`) und Fn+Knopf (`13 03`, Display) entschlüsseln.

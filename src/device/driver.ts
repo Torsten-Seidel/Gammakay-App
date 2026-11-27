@@ -1,6 +1,6 @@
-import type { ConfigSection, DeviceConfig, LightingConfig } from './model';
+import type { ConfigSection, DeviceConfig, LightingConfig, MacroStep } from './model';
 import {
-  LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_DEFAULT_MATRIX, TK75_KEYMAP_SLOTS, TK75_KNOB_SLOTS, describeRawEntry,
+  MACRO_BYTES, MACRO_SLOTS, encodeMacro, LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_DEFAULT_MATRIX, TK75_KEYMAP_SLOTS, TK75_KNOB_SLOTS, describeRawEntry,
 } from './gamakay/protocol';
 
 export interface DeviceInfo {
@@ -30,6 +30,8 @@ export interface Capabilities {
   factoryFn?: Record<string, { code?: string; fn?: string; label?: string }>;
   /** Werksbelegung der Basis-Ebene für Teile ohne eigene Beschriftung (Drehknopf) */
   factoryBase?: Record<string, { code?: string; fn?: string; label?: string }>;
+  /** Makrospeicher: Plätze, Byte je Makro und Größe einer Schrittfolge (Fehlertext, wenn nicht schreibbar) */
+  macros?: { slots: number; bytes: number; size(steps: MacroStep[]): number | string };
 }
 
 export interface KeyboardDriver {
@@ -60,6 +62,17 @@ export const TK75_CAPABILITIES: Capabilities = {
   lightLevels: 4,
   sideLightEffects: SIDE_LED_EFFECTS.map(({ id, label, rainbowOnly }) => ({ id, label, rainbowOnly })),
   sideSpeedMax: SIDE_SPEED_MAX,
+  macros: {
+    slots: MACRO_SLOTS,
+    bytes: MACRO_BYTES,
+    size(steps) {
+      try {
+        return encodeMacro(steps, 1).length;
+      } catch (e) {
+        return e instanceof Error ? e.message : String(e);
+      }
+    },
+  },
   factoryBase: Object.fromEntries(Object.entries(TK75_KNOB_SLOTS).flatMap(([key, slot]) => {
     const d = describeRawEntry(TK75_DEFAULT_MATRIX[slot]);
     return d ? [[key, d]] : [];

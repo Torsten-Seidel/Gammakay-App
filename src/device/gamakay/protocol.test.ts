@@ -7,6 +7,7 @@ import {
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
+  encodeMacro, decodeMacro, macroWritePackets, macroReadPacket, macroBindingEntry, decodeMacroBinding,
   decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
 } from './protocol.ts';
 
@@ -274,4 +275,54 @@ test('Drehknopf: Plätze 90–92, Werk = Leiser/Lauter/Play', () => {
   assert.equal(TK75_KEYMAP_SLOTS.filter(Boolean).length, 85);
   assert.deepEqual(decodeKeyAction([3, 0, 234, 0], 90), { kind: 'default' });
   assert.deepEqual(encodeKeyAction({ kind: 'function', fn: 'light.brightDown' }, 90), [13, 2, 2, 0]);
+});
+
+test('Makro: Kodierung wie GearHub macroEventToByte (kurze und lange Pause)', () => {
+  const data = encodeMacro([
+    { type: 'down', code: 'KeyA' }, { type: 'delay', ms: 50 },
+    { type: 'up', code: 'KeyA' }, { type: 'delay', ms: 300 },
+    { type: 'down', code: 'MouseLeft' },
+  ], 3);
+  // Anzahl 3 | A gedrückt 50 ms | A los 300 ms (lang) | Maus links gedrückt, Standardabstand 10 ms
+  assert.deepEqual(data, bytes('03 00 04 b2 04 00 2c 01 f0 8a'));
+  const back = decodeMacro([...data, 0, 0, 0, 0]);
+  assert.equal(back.repeat, 3);
+  assert.deepEqual(back.steps, [
+    { type: 'down', code: 'KeyA' }, { type: 'delay', ms: 50 },
+    { type: 'up', code: 'KeyA' }, { type: 'delay', ms: 300 },
+    { type: 'down', code: 'MouseLeft' }, { type: 'delay', ms: 10 },
+  ]);
+});
+
+test('Makro: Pausen am Stück werden addiert, führende entfallen, 0 ms wird 1 ms', () => {
+  const data = encodeMacro([{ type: 'delay', ms: 99 }, { type: 'down', code: 'KeyB' }, { type: 'delay', ms: 0 },
+    { type: 'up', code: 'KeyB' }, { type: 'delay', ms: 100 }, { type: 'delay', ms: 100 }], 1);
+  assert.deepEqual(data, bytes('01 00 05 81 05 00 c8 00'));
+});
+
+test('Makro: unbekannte Taste, zu lang und leerer Speicher', () => {
+  assert.throws(() => encodeMacro([{ type: 'down', code: 'Fn' }], 1));
+  const many = Array.from({ length: 128 }, () => ({ type: 'down' as const, code: 'KeyA' }));
+  assert.throws(() => encodeMacro(many, 1), /zu lang/);
+  assert.deepEqual(decodeMacro(new Array(64).fill(0xff)).steps, []);
+});
+
+test('Makro: Schreibpakete 0B mit Ende-Kennzeichen nur auf der letzten Seite', () => {
+  const short = macroWritePackets(2, bytes('01 00 04 8a 04 0a'));
+  assert.equal(short.length, 1);
+  assert.deepEqual(Array.from(short[0].slice(0, 14)), [0x0b, 2, 0, 56, 1, 0, 0, checksum([0x0b, 2, 0, 56, 1, 0, 0], 7), ...bytes('01 00 04 8a 04 0a')]);
+  const long = macroWritePackets(0, new Array(60).fill(4));
+  assert.equal(long.length, 2);
+  assert.deepEqual([long[0][2], long[0][4], long[1][2], long[1][4]], [0, 0, 1, 1]);
+  assert.equal(macroWritePackets(0, new Array(256).fill(4)).length, 5);
+  assert.deepEqual(Array.from(macroReadPacket(1, 2).slice(0, 8)), [0x8b, 1, 2, 0, 0, 0, 0, checksum([0x8b, 1, 2, 0, 0, 0, 0], 7)]);
+});
+
+test('Makro-Belegung 09 <Art> <Platz> 00', () => {
+  const lookup = (id: string) => (id === 'm' ? { slot: 4, playback: 'toggle' as const } : undefined);
+  assert.deepEqual(encodeKeyAction({ kind: 'macro', macroId: 'm' }, 8, 'base', lookup), [9, 1, 4, 0]);
+  assert.throws(() => encodeKeyAction({ kind: 'macro', macroId: 'x' }, 8, 'base', lookup));
+  assert.deepEqual(macroBindingEntry(0, 'while-held'), [9, 2, 0, 0]);
+  assert.deepEqual(decodeMacroBinding([9, 0, 7, 0]), { slot: 7, mode: 'count' });
+  assert.equal(decodeMacroBinding([0, 0, 4, 0]), null);
 });

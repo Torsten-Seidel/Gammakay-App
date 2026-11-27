@@ -42,6 +42,8 @@ export const CMD = {
   SET_FN: 0x10,
   GET_MULTI_MAGNETISM: 0xe5,
   SET_MULTI_MAGNETISM: 0x65,
+  GET_MACRO: 0x8b,
+  SET_MACRO: 0x0b,
   SET_REPORT_RATE: 0x03,
   SET_LED: 0x07,
   SET_SIDE_LED: 0x08,
@@ -451,7 +453,11 @@ export const FUNCTION_CODES: Record<string, readonly number[]> = {
 };
 
 /** Belegung eines Platzes (Modell) → 4 Byte. `default` = Werksbelegung dieses Platzes auf dieser Ebene. */
-export function encodeKeyAction(action: KeyActionLike, slot: number, layer: MatrixLayer = 'base'): number[] {
+export function encodeKeyAction(
+  action: KeyActionLike, slot: number, layer: MatrixLayer = 'base',
+  /** Makro-ID → Speicherplatz und Wiedergabe (nur für Makro-Belegungen nötig) */
+  macro?: (id: string) => { slot: number; playback: MacroPlaybackLike } | undefined,
+): number[] {
   const hid = (code: string) => {
     const h = CODE_TO_HID[code];
     if (h === undefined) throw new Error(`Taste ${code} ist auf der TK75 nicht belegbar`);
@@ -471,7 +477,12 @@ export function encodeKeyAction(action: KeyActionLike, slot: number, layer: Matr
       if (!f) throw new Error(`Funktion ${action.fn} wird von der TK75 noch nicht unterstützt`);
       return [...f];
     }
-    default: throw new Error(`${action.kind} kann noch nicht auf die Tastatur geschrieben werden`);
+    case 'macro': {
+      const m = macro?.(action.macroId);
+      if (!m) throw new Error('Das zugewiesene Makro gibt es nicht mehr');
+      return macroBindingEntry(m.slot, m.playback);
+    }
+    default: throw new Error(`${(action as { kind: string }).kind} kann noch nicht auf die Tastatur geschrieben werden`);
   }
 }
 
@@ -533,6 +544,122 @@ export type KeyActionLike =
   | { kind: 'function'; fn: string }
   | { kind: 'macro'; macroId: string }
   | { kind: 'disabled' };
+
+// ---------- Makros (8B lesen, 0B schreiben; GearHub getMacro/_setMacro/buffToMacroEvents/macroEventToByte) ----------
+
+export type MacroPlaybackLike = 'once' | 'repeat' | 'while-held' | 'toggle';
+export type MacroStepLike = { type: 'down' | 'up'; code: string } | { type: 'delay'; ms: number };
+
+/** Makro-Speicherplätze (GearHub `maxMacro`) und Datengröße je Makro (4 Leseseiten à 64 Byte). */
+export const MACRO_SLOTS = 50;
+export const MACRO_BYTES = 256;
+const MACRO_WRITE_CHUNK = 56;
+const MACRO_READ_PAGES = 4;
+/** Abstand, wenn zwei Ereignisse ohne Pause aufeinander folgen (das Gerät braucht nach jedem Ereignis eine Pause). */
+export const MACRO_DEFAULT_GAP_MS = 10;
+const MACRO_MAX_DELAY = 0xffff;
+/** Maustasten im Makro (GearHub `zn`: Links f0, Rechts f1, Mitte f2, Zurück f3, Vor f4). */
+const MOUSE_HID: Record<string, number> = { MouseLeft: 0xf0, MouseRight: 0xf1, MouseMiddle: 0xf2, MouseBack: 0xf3, MouseForward: 0xf4 };
+const HID_MOUSE: Record<number, string> = Object.fromEntries(Object.entries(MOUSE_HID).map(([c, h]) => [h, c]));
+const MOUSE_MOVE = 0xf9;
+
+/** Wiedergabeart in der Belegung `09 <Art> <Platz> 00`: 0 Anzahl, 1 Start/Stopp, 2 solange gedrückt. */
+const PLAYBACK_CODE: Record<MacroPlaybackLike, number> = { once: 0, repeat: 0, toggle: 1, 'while-held': 2 };
+
+export function macroBindingEntry(slot: number, playback: MacroPlaybackLike): number[] {
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MACRO_SLOTS) throw new Error(`Ungültiger Makro-Platz ${slot}`);
+  return [9, PLAYBACK_CODE[playback], slot, 0];
+}
+
+/** `09 <Art> <Platz> 00` → Platz und Wiedergabeart (Art 0 = Anzahl; „einmal“/„N-mal“ entscheidet die Anzahl). */
+export function decodeMacroBinding(entry: ArrayLike<number>): { slot: number; mode: 'count' | 'toggle' | 'while-held' } | null {
+  if (entry[0] !== 9 || entry[2] >= MACRO_SLOTS) return null;
+  return { slot: entry[2], mode: entry[1] === 1 ? 'toggle' : entry[1] === 2 ? 'while-held' : 'count' };
+}
+
+/** `8B <Platz> <Seite>` (Prüfsumme Byte 7); Antwort = 64 Byte Makrodaten je Seite. */
+export function macroReadPacket(slot: number, page: number): Uint8Array {
+  return makePacket([CMD.GET_MACRO, slot, page], 7);
+}
+
+/** GearHub liest weiter, bis eine Seite vier Nullbytes am Stück enthält (Ende der Ereignisliste). */
+export function macroPageHasEnd(page: ArrayLike<number>): boolean {
+  for (let i = 0; i + 3 < page.length; i++) if (!page[i] && !page[i + 1] && !page[i + 2] && !page[i + 3]) return true;
+  return false;
+}
+export const MACRO_MAX_READ_PAGES = MACRO_READ_PAGES;
+
+/**
+ * Schritte → Gerätedaten: `<Anzahl u16 LE>` + je Ereignis `<HID> <Bit7 = gedrückt | Pause>` (Pause 1–127 ms)
+ * oder `<HID> <Bit7> <Pause u16 LE>` (ab 128 ms). Jedes Ereignis trägt die Pause danach; mehrere Pausen am Stück
+ * werden addiert, Pausen vor dem ersten Ereignis fallen weg.
+ */
+export function encodeMacro(steps: readonly MacroStepLike[], repeat: number): number[] {
+  if (!Number.isInteger(repeat) || repeat < 1 || repeat > 0xffff) throw new Error('Wiederholungen: 1 bis 65535');
+  const out = [repeat & 0xff, repeat >> 8];
+  for (let i = 0; i < steps.length; i++) {
+    const s = steps[i];
+    if (s.type === 'delay') continue;
+    let gap: number | null = null;
+    for (let j = i + 1; j < steps.length && steps[j].type === 'delay'; j++) gap = (gap ?? 0) + (steps[j] as { ms: number }).ms;
+    const ms = Math.round(Math.max(1, gap ?? MACRO_DEFAULT_GAP_MS));
+    if (ms > MACRO_MAX_DELAY) throw new Error(`Pause zu lang (höchstens ${MACRO_MAX_DELAY} ms)`);
+    const hid = MOUSE_HID[s.code] ?? (s.code === 'Fn' ? undefined : CODE_TO_HID[s.code]);
+    if (hid === undefined) throw new Error(`Taste ${s.code} kann in einem TK75-Makro nicht vorkommen`);
+    const down = s.type === 'down' ? 0x80 : 0;
+    out.push(...(ms <= 0x7f ? [hid, down | ms] : [hid, down, ms & 0xff, ms >> 8]));
+  }
+  if (out.length > MACRO_BYTES) throw new Error(`Makro zu lang (${out.length} von ${MACRO_BYTES} Byte)`);
+  return out;
+}
+
+/** Gerätedaten → Schritte. Mausbewegungen kennt die App nicht; sie werden übersprungen und gemeldet. */
+export function decodeMacro(data: ArrayLike<number>): { repeat: number; steps: MacroStepLike[]; skipped: number } {
+  const b = Array.from(data);
+  const repeat = (b[0] ?? 0) | ((b[1] ?? 0) << 8);
+  const steps: MacroStepLike[] = [];
+  let skipped = 0;
+  const u16 = (i: number) => (b[i] ?? 0) | ((b[i + 1] ?? 0) << 8);
+  for (let i = 2; i + 1 < b.length;) {
+    const [code, flags] = [b[i], b[i + 1]];
+    let ms: number;
+    if (code === MOUSE_MOVE) {
+      // f9 <Pause|0> <dx> <dy> [Pause u16]
+      ms = flags || u16(i + 4);
+      i += flags ? 4 : 6;
+      skipped++;
+    } else {
+      const name = HID_MOUSE[code] ?? (code >= 4 && code <= 0xef ? HID_TO_CODE[code] : undefined);
+      if (!name) break; // 00 = Ende, ff = leerer Speicher, sonst unbekannt
+      ms = flags & 0x7f;
+      if (ms) i += 2;
+      else {
+        ms = u16(i + 2);
+        i += 4;
+      }
+      steps.push({ type: flags & 0x80 ? 'down' : 'up', code: name });
+    }
+    if (ms) steps.push({ type: 'delay', ms });
+  }
+  return { repeat, steps, skipped };
+}
+
+/**
+ * Makro schreiben: `0B <Platz> <Seite> 38 <Ende> 00 00 <Prüfsumme>` + 56 Byte. Gesendet werden die Seiten bis
+ * einschließlich der vier Nullbytes nach dem letzten Ereignis, damit alte, längere Daten nicht weiterlaufen.
+ */
+export function macroWritePackets(slot: number, data: readonly number[]): Uint8Array[] {
+  if (!Number.isInteger(slot) || slot < 0 || slot >= MACRO_SLOTS) throw new Error(`Ungültiger Makro-Platz ${slot}`);
+  if (data.length > MACRO_BYTES) throw new Error('Makro zu lang');
+  const used = Math.min(MACRO_BYTES, data.length + 4);
+  const buf = [...data, ...new Array(MACRO_BYTES - data.length).fill(0)];
+  const pages = Math.ceil(used / MACRO_WRITE_CHUNK);
+  return Array.from({ length: pages }, (_, p) => {
+    const chunk = buf.slice(p * MACRO_WRITE_CHUNK, (p + 1) * MACRO_WRITE_CHUNK);
+    return makePacket([CMD.SET_MACRO, slot, p, MACRO_WRITE_CHUNK, p === pages - 1 ? 1 : 0], 7,
+      [...chunk, ...new Array(MACRO_WRITE_CHUNK - chunk.length).fill(0)]);
+  });
+}
 
 /** `0A <Profil> <Platz> 00 00 <Ende> <Ebene> <Prüfsumme>` + 4 Byte (GearHub setKeyConfigSimple). */
 export function keyMatrixWritePacket(profile: number, slot: number, entry: number[], layer = 0): Uint8Array {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { keyLabel } from '../device/layout';
-import { newId, type MacroPlayback, type MacroStep } from '../device/model';
-import { useApp, useMacros } from '../store';
+import { newId, type DeviceConfig, type MacroPlayback, type MacroStep } from '../device/model';
+import { useApp, useCapabilities, useMacros } from '../store';
 import { Card, EmptyHint, PanelHeader } from '../components/ui';
 import { Icon } from '../components/Icon';
 
@@ -12,10 +12,20 @@ const PLAYBACK: { id: MacroPlayback; label: string }[] = [
   { id: 'toggle', label: 'Start/Stopp per Tastendruck' },
 ];
 
+/** Tasten, auf denen ein Makro liegt (aktives Profil, Haupt- und Fn-Ebene). */
+function boundKeys(config: DeviceConfig | null, macroId: string): { layer: 'base' | 'fn'; key: string }[] {
+  if (!config) return [];
+  const p = config.profiles[config.activeProfile];
+  return (['base', 'fn'] as const).flatMap((layer) => Object.entries(p.keymap[layer])
+    .filter(([, a]) => a.kind === 'macro' && a.macroId === macroId).map(([key]) => ({ layer, key })));
+}
+
 export function MacroPanel() {
   const macros = useMacros();
   const layout = useApp((s) => s.layout);
   const edit = useApp((s) => s.edit);
+  const config = useApp((s) => s.config);
+  const limits = useCapabilities().macros;
   const [activeId, setActiveId] = useState<string | null>(null);
   const [recording, setRecording] = useState(false);
   const recorded = useRef<MacroStep[]>([]);
@@ -53,6 +63,23 @@ export function MacroPanel() {
     setActiveId(id);
   };
 
+  /** Makro löschen und Tasten, die es auslösen, auf Standard zurücksetzen (in allen Profilen). */
+  const deleteMacro = () => {
+    edit((d) => {
+      d.macros = d.macros.filter((x) => x.id !== activeId);
+      for (const p of d.profiles) {
+        for (const layer of ['base', 'fn'] as const) {
+          for (const [k, a] of Object.entries(p.keymap[layer])) if (a.kind === 'macro' && a.macroId === activeId) delete p.keymap[layer][k];
+        }
+      }
+    });
+    setActiveId(null);
+  };
+
+  const full = !!limits && macros.length >= limits.slots;
+  const size = macro && limits ? limits.size(macro.steps) : null;
+  const bound = macro ? boundKeys(config, macro.id) : [];
+
   const toggleRecording = () => {
     if (recording) {
       const steps = recorded.current;
@@ -67,7 +94,9 @@ export function MacroPanel() {
   return (
     <div className="panel">
       <PanelHeader title="Makros">
-        <button className="btn" onClick={addMacro}><Icon name="plus" size={16} /> Neues Makro</button>
+        <button className="btn" disabled={full} title={full ? `Die Tastatur hat ${limits?.slots} Makro-Plätze` : undefined} onClick={addMacro}>
+          <Icon name="plus" size={16} /> Neues Makro
+        </button>
       </PanelHeader>
       <div className="grid-sidebar">
         <Card title="Bibliothek">
@@ -91,7 +120,7 @@ export function MacroPanel() {
               </button>
               <button className="btn ghost" disabled={recording} onClick={() => update((m) => void (m.steps = []))}>Leeren</button>
               <button className="icon-btn" disabled={recording} title="Makro löschen"
-                onClick={() => { edit((d) => void (d.macros = d.macros.filter((x) => x.id !== activeId))); setActiveId(null); }}>
+                onClick={deleteMacro}>
                 <Icon name="trash" size={16} />
               </button>
             </div>
@@ -102,6 +131,13 @@ export function MacroPanel() {
           ) : (
             <>
               {recording && <p className="recording">● Aufnahme läuft – tippe jetzt die gewünschte Tastenfolge.</p>}
+              <p className="hint">
+                {bound.length
+                  ? <>Liegt auf: {bound.map((b) => `${b.layer === 'fn' ? 'Fn+' : ''}${keyLabel(b.key, layout)}`).join(', ')}</>
+                  : <>Noch keiner Taste zugewiesen – das geht unter „Tastenbelegung“ → „Makro“.</>}
+                {typeof size === 'number' && <> · Speicher {size} / {limits!.bytes} Byte</>}
+              </p>
+              {typeof size === 'string' && <p className="hint error-text">{size}</p>}
               <div className="row">
                 <label className="field inline">Wiedergabe
                   <select value={macro.playback} onChange={(e) => update((m) => void (m.playback = e.target.value as MacroPlayback))}>

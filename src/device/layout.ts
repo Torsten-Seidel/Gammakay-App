@@ -78,6 +78,8 @@ export const LAYOUT_WIDTH = 16;
 export const LAYOUT_HEIGHT = 6.25;
 
 const BASE_LABELS: Record<string, string> = {
+  // Maustasten (nur in Makros, z. B. aus GearHub)
+  MouseLeft: 'Maus links', MouseRight: 'Maus rechts', MouseMiddle: 'Maus Mitte', MouseBack: 'Maus zurück', MouseForward: 'Maus vor',
   Escape: 'Esc', Delete: 'Del', Backquote: '`', Minus: '-', Equal: '=', Backspace: 'Backspace',
   Home: 'Home', Tab: 'Tab', BracketLeft: '[', BracketRight: ']', Backslash: '\\', PageUp: 'PgUp',
   CapsLock: 'Caps', Semicolon: ';', Quote: "'", Enter: 'Enter', PageDown: 'PgDn', ShiftLeft: 'Shift',
