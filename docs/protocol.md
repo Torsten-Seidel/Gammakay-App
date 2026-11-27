@@ -174,8 +174,17 @@ SET 08 00 00 00 07 fa ff fa fd   Ausschalten (= Ursprungszustand)
   (`8f 07 0e …`).
 - Abstände laut GearHub 10 ms, Warten auf Status bis 5 × 100 ms. GearHub fragt `F7` alle 2 s.
 
+## Polling-Rate (aus dem GearHub-Treiber, `setReportRate`/`getReportRate`)
+
+- Lesen `83` → Byte 2 = Stufe. Schreiben `03 00 <Stufe> 00 00 00 00 <Prüfsumme in Byte 7>`.
+- Stufen: 0 = 8000 Hz, 1 = 4000, 2 = 2000, 3 = 1000, 4 = 500, 5 = 250, 6 = 125.
+- Beim Verbinden gelesen: `83 00 00 …` = 8000 Hz. Die TK75 (PID `0x5030`) steht in GearHubs Geräteliste mit
+  `reportRate: 8000` als Höchstwert.
+
+- Auf der Tastatur bestätigt (2026-11-27, USB): 8 kHz → 1 kHz geschrieben, nach Neuverbinden 1 kHz gelesen.
+  Die Tastatur bleibt dabei verbunden (keine Neuanmeldung).
+
 ## Offen / nächste Mitschnitte
 
-1. Polling-Rate ändern → bestätigt `83`/`03`?
-2. Energiespar-Zeiten (`91`/`11`).
+1. Energiespar-Zeiten (`91`/`11`).
 3. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).

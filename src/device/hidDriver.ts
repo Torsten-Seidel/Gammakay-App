@@ -1,12 +1,12 @@
 import type { KeyboardDriver } from './driver';
 import { TK75_CAPABILITIES } from './driver';
 import { log } from './log';
-import { createDefaultConfig, type ConfigSection, type DeviceConfig, type LightingConfig } from './model';
+import { createDefaultConfig, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig } from './model';
 import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  decodeInfoName, decodeLed, decodeSleep, decodeVersion, ledPacket, type LedState,
+  decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
 
@@ -42,13 +42,15 @@ const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 G
 export class GamakayHidDriver implements KeyboardDriver {
   readonly capabilities = TK75_CAPABILITIES;
   readonly supports = { read: true, write: true };
-  readonly writableSections: ConfigSection[] = ['lighting'];
+  readonly writableSections: ConfigSection[] = ['lighting', 'settings'];
   readonly info: { name: string; transport: 'usb' | 'bt' | 'dongle'; vendorId: number; productId: number; firmware?: string };
   private readonly transport: Transport;
   /** Eigene Seitenlicht-Einstellung, solange die Akkuanzeige das Seitenlicht überlagert */
   private userSide: SideLight | null = null;
   private led: LedState | null = null;
   private side: LedState | null = null;
+  /** Zuletzt gelesene/geschriebene Geräteeinstellungen (zum Erkennen, was sich ändert) */
+  private settings: DeviceSettings | null = null;
 
   private constructor(device: HIDDevice) {
     const transport = isBtConfig(device) ? 'bt' : isDongleConfig(device) ? 'dongle' : 'usb';
@@ -113,6 +115,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     this.led = decodeLed(await t.query(CMD.GET_LED));
     const side = (this.side = decodeLed(await t.query(CMD.GET_SIDE_LED)));
     const sleep = decodeSleep(await t.query(CMD.GET_SLEEP));
+    const rate = decodeReportRate(await t.query(CMD.GET_REPORT_RATE));
 
     // Profil-/Tastendaten sind noch nicht entschlüsselt → nur Licht und Energiesparen aus dem Gerät.
     for (const p of cfg.profiles) {
@@ -138,11 +141,13 @@ export class GamakayHidDriver implements KeyboardDriver {
     const min = (s: number) => Math.round(s / 60);
     cfg.settings = {
       ...cfg.settings,
+      pollingRate: rate ?? cfg.settings.pollingRate,
       backlightOff24gMin: min(sleep[0]),
       backlightOffBtMin: min(sleep[1]),
       standbyMin: min(sleep[2]),
       btSleepMin: min(sleep[3]),
     };
+    this.settings = { ...cfg.settings };
     const effectName = LED_EFFECTS.find((e) => e.code === this.led!.mode)?.label ?? `unbekannt 0x${this.led.mode.toString(16)}`;
     log('info', `Gelesen: Licht ${effectName}, Tempo ${rawToSpeed(this.led.speed)}, Option ${this.led.option}, ` +
       `Helligkeit ${this.led.brightness}, ` +
@@ -151,6 +156,7 @@ export class GamakayHidDriver implements KeyboardDriver {
   }
 
   async writeSection(section: ConfigSection, config: DeviceConfig): Promise<void> {
+    if (section === 'settings') return this.writeSettings(config.settings);
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
     if (!this.led || !this.side) throw new Error('Licht wurde noch nicht gelesen.');
     const wanted = config.profiles[config.activeProfile].lighting;
@@ -190,6 +196,21 @@ export class GamakayHidDriver implements KeyboardDriver {
         `Helligkeit ${wanted.side.brightness}, ${wanted.side.rainbow ? 'bunt' : wanted.side.color}`);
     }
     if (!keyChanged && !sideChanged) log('info', 'Licht unverändert – nichts gesendet.');
+  }
+
+  /** Bisher nur die Polling-Rate; Energiespar-Zeiten sind noch nicht freigegeben. */
+  private async writeSettings(wanted: DeviceSettings): Promise<void> {
+    if (!this.settings) throw new Error('Einstellungen wurden noch nicht gelesen.');
+    const { pollingRate, ...rest } = wanted;
+    const { pollingRate: current, ...currentRest } = this.settings;
+    if (JSON.stringify(rest) !== JSON.stringify(currentRest)) {
+      throw new Error('Energiespar-Zeiten kann die App noch nicht schreiben – bitte diese Änderung verwerfen.');
+    }
+    if (pollingRate === current) return;
+    await this.transport.write(reportRatePacket(pollingRate));
+    await new Promise((r) => setTimeout(r, 300)); // GearHub: kurze Pause nach dem Umschalten
+    this.settings = { ...this.settings, pollingRate };
+    log('info', `Polling-Rate geschrieben: ${pollingRate >= 1000 ? `${pollingRate / 1000} kHz` : `${pollingRate} Hz`}`);
   }
 
   private sidePacketFor(side: SideLight): Uint8Array {

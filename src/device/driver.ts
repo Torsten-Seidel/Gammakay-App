@@ -1,5 +1,5 @@
 import type { ConfigSection, DeviceConfig, LightingConfig } from './model';
-import { LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX } from './gamakay/protocol';
+import { LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX } from './gamakay/protocol';
 
 export interface DeviceInfo {
   name: string;
@@ -44,7 +44,7 @@ export interface KeyboardDriver {
 
 export const TK75_CAPABILITIES: Capabilities = {
   profiles: 4,
-  pollingRates: [8000, 4000, 2000, 1000, 500, 250, 125],
+  pollingRates: POLLING_RATES,
   travel: { min: 0.1, max: 3.4, step: 0.01 },
   // Annahme – die echte Auflösung des TK75-Displays muss noch ermittelt werden.
   display: { width: 128, height: 128 },

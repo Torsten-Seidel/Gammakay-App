@@ -14,6 +14,7 @@ export function DevicePanel() {
   const settings = useApp((s) => s.config?.settings);
   const rates = useCapabilities().pollingRates;
   const info = useApp((s) => s.driver?.info);
+  const isHid = !!info && info.transport !== 'mock';
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);
   const edit = useApp((s) => s.edit);
@@ -32,9 +33,10 @@ export function DevicePanel() {
               </button>
             ))}
           </div>
-          <EmptyHint>8 kHz nur per USB-Kabel; kabellos sind meist max. 1 kHz möglich.</EmptyHint>
+          <EmptyHint>8 kHz nur per USB-Kabel; kabellos sind meist max. 1 kHz möglich. Wirkt nach „Übernehmen“.</EmptyHint>
         </Card>
         <Card title="Energiesparen">
+          {isHid && <EmptyHint>Die Zeiten werden bisher nur gelesen – Ändern folgt nach dem nächsten Mitschnitt.</EmptyHint>}
           {TIMERS.map((t) => (
             <label key={t.key} className="field inline spread">
               <span>{t.label}{t.hint && <small> ({t.hint})</small>}</span>

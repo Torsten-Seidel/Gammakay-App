@@ -34,6 +34,8 @@ export const CMD = {
   GET_LED: 0x87,
   GET_SIDE_LED: 0x88,
   GET_SLEEP: 0x91,
+  GET_REPORT_RATE: 0x83,
+  SET_REPORT_RATE: 0x03,
   SET_LED: 0x07,
   SET_SIDE_LED: 0x08,
 } as const;
@@ -243,6 +245,23 @@ export function decodeDongleStatus(res: ArrayLike<number>): DongleStatus {
     online: keyboard && res[3] === 0,
     battery: Math.min(100, res[1] ?? 0),
   };
+}
+
+// ---------- Polling-Rate ----------
+
+/** Polling-Raten in Hz, Index = Stufe im Gerät (GearHub setReportRate/getReportRate) */
+export const POLLING_RATES = [8000, 4000, 2000, 1000, 500, 250, 125];
+
+/** Antwort auf `83`: Byte 2 = Stufe. undefined bei unbekanntem Wert. */
+export function decodeReportRate(res: ArrayLike<number>): number | undefined {
+  return POLLING_RATES[res[2]];
+}
+
+/** Schreibpaket `03 00 <Stufe> 00 00 00 00 <Prüfsumme>` */
+export function reportRatePacket(rate: number): Uint8Array {
+  const index = POLLING_RATES.indexOf(rate);
+  if (index < 0) throw new Error(`Polling-Rate ${rate} Hz wird nicht unterstützt`);
+  return makePacket([CMD.SET_REPORT_RATE, 0, index], 7);
 }
 
 // ---------- Energiesparen ----------

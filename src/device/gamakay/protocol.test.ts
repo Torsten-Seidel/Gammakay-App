@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
-  decodeDongleStatus, sideLedPacket, speedToRaw,
+  decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, speedToRaw,
 } from './protocol.ts';
 
 const bytes = (s: string) => s.trim().split(/\s+/).map((h) => parseInt(h, 16));
@@ -118,6 +118,15 @@ test('Empfänger-Status (F7) aus dem Mitschnitt', () => {
   assert.deepEqual(idle, { keyboard: true, canRead: false, canSend: true, online: true, battery: 100 });
   assert.equal(decodeDongleStatus(bytes('01 64 00 00 01 01 01 00 00')).canRead, true);
   assert.equal(decodeDongleStatus(bytes('00 00 50 01 00 01 02 00 00')).keyboard, false); // nur Maus
+});
+
+test('Polling-Rate lesen und schreiben', () => {
+  assert.equal(decodeReportRate(bytes('83 00 00 00 00 00 00 7c')), 8000); // Mitschnitt beim Verbinden
+  assert.equal(decodeReportRate(bytes('83 00 03 00 00 00 00 79')), 1000);
+  assert.equal(decodeReportRate(bytes('83 00 09')), undefined);
+  assert.deepEqual(Array.from(reportRatePacket(1000).slice(0, 9)), bytes('03 00 03 00 00 00 00 f9 00'));
+  assert.deepEqual(Array.from(reportRatePacket(8000).slice(0, 8)), bytes('03 00 00 00 00 00 00 fc'));
+  assert.throws(() => reportRatePacket(3000));
 });
 
 test('Energiespar-Zeiten und Geräteinfo werden dekodiert', () => {
