@@ -12,6 +12,7 @@ interface DesktopBridge {
   isElectron: boolean;
   onHidDeviceList(cb: (list: ListedDevice[]) => void): () => void;
   chooseHidDevice(deviceId: string | null): void;
+  appendLog?(line: string): void;
 }
 
 declare global {

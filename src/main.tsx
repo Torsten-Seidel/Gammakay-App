@@ -2,6 +2,9 @@ import { Component, StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles.css';
+import { installDevHooks } from './devHooks';
+
+if (import.meta.env.DEV) installDevHooks();
 
 /** Zeigt Renderfehler an, statt die Oberfläche komplett leer zu lassen. */
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {

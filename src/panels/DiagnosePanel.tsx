@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { requestHidDevices } from '../device/hidDriver';
-import { hex16, log, toHex, useLog } from '../device/log';
+import { formatLogLine, hex16, log, toHex, useLog } from '../device/log';
 import { Card, EmptyHint, PanelHeader } from '../components/ui';
 
 // Diagnose ist bewusst NUR lesend: Interfaces auflisten, Input-Reports mitlesen, Feature-Reports abfragen.
@@ -100,7 +100,7 @@ export function DiagnosePanel() {
   };
 
   const copyLog = () => {
-    const text = entries.map((e) => `${new Date(e.time).toISOString()} ${e.dir.toUpperCase().padEnd(5)} ${e.text}`).join('\n');
+    const text = entries.map((e) => formatLogLine(e.time, e.dir, e.text)).join('\n');
     void navigator.clipboard.writeText(text);
   };
 

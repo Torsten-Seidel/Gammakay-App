@@ -26,7 +26,15 @@ export const useLog = create<LogState>((set) => ({
   clear: () => set({ entries: [] }),
 }));
 
-export const log = (dir: LogDirection, text: string) => useLog.getState().add(dir, text);
+export const log = (dir: LogDirection, text: string) => {
+  useLog.getState().add(dir, text);
+  // In Electron zusätzlich in die Log-Datei (logs/diagnose.log), gleiches Format wie „Log kopieren“.
+  window.desktop?.appendLog?.(formatLogLine(Date.now(), dir, text));
+};
+
+export function formatLogLine(time: number, dir: LogDirection, text: string): string {
+  return `${new Date(time).toISOString()} ${dir.toUpperCase().padEnd(5)} ${text}`;
+}
 
 export function toHex(data: DataView | Uint8Array, max = 64): string {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);

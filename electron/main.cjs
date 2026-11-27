@@ -1,9 +1,29 @@
 // Electron-Hauptprozess: Fenster, WebHID-Geräteauswahl und Berechtigungen.
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 
 const DEV_URL = 'http://127.0.0.1:5173';
 const useDist = app.isPackaged || process.argv.includes('--dist');
+
+// Entwicklungsmodus: Debug-Zugang nur auf diesem Rechner (127.0.0.1), damit Tests die laufende App
+// steuern können (tools/app-test.mjs). In der gebauten App gibt es ihn nicht.
+const DEBUG_PORT = 9229;
+if (!useDist) {
+  app.commandLine.appendSwitch('remote-debugging-port', String(DEBUG_PORT));
+  app.commandLine.appendSwitch('remote-debugging-address', '127.0.0.1');
+}
+
+// Protokoll-Log zusätzlich als Datei: Entwicklung → <Projekt>/logs, gebaute App → Log-Ordner des Systems.
+const LOG_DIR = useDist ? app.getPath('logs') : path.join(__dirname, '..', 'logs');
+const LOG_FILE = path.join(LOG_DIR, 'diagnose.log');
+try {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+  // Pro App-Start eine neue Datei, die vorige bleibt als diagnose.prev.log erhalten.
+  if (fs.existsSync(LOG_FILE)) fs.renameSync(LOG_FILE, path.join(LOG_DIR, 'diagnose.prev.log'));
+} catch (e) {
+  console.error('Log-Ordner nicht nutzbar:', e);
+}
 
 let mainWindow = null;
 // Callback aus 'select-hid-device', solange die eigene Geräteauswahl offen ist.
@@ -108,6 +128,15 @@ function createWindow() {
   if (useDist) mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   else mainWindow.loadURL(DEV_URL);
 }
+
+ipcMain.on('log:line', (_event, line) => {
+  if (typeof line !== 'string') return;
+  try {
+    fs.appendFileSync(LOG_FILE, `${line.slice(0, 4000)}\n`);
+  } catch {
+    // Log-Datei ist nur eine Hilfe – Fehler hier dürfen die App nicht stören.
+  }
+});
 
 ipcMain.on('hid:choose', (_event, deviceId) => {
   if (!pendingHidCallback) return;

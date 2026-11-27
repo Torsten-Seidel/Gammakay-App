@@ -13,4 +13,8 @@ contextBridge.exposeInMainWorld('desktop', {
   chooseHidDevice(deviceId) {
     ipcRenderer.send('hid:choose', deviceId ?? null);
   },
+  /** Eine Zeile an die Log-Datei anhängen. */
+  appendLog(line) {
+    ipcRenderer.send('log:line', String(line));
+  },
 });
