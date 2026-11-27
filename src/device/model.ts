@@ -16,12 +16,13 @@ export type KeyAction =
 export interface SwitchConfig {
   /** Auslösepunkt in mm */
   actuation: number;
+  /** Rückstellpunkt in mm (gilt ohne Rapid Trigger; gleich actuation = nicht getrennt eingestellt) */
+  releasePoint: number;
+  /** Rapid Trigger über den gesamten Hub (bei der TK75 gibt es kein getrenntes „Continuous RT“) */
   rapidTrigger: boolean;
   /** RT-Empfindlichkeit beim Drücken / Loslassen in mm */
   rtPress: number;
   rtRelease: number;
-  /** Continuous RT über den gesamten Hub */
-  continuousRT: boolean;
   /** Totzonen oben / unten in mm */
   deadzoneTop: number;
   deadzoneBottom: number;
@@ -124,10 +125,10 @@ export const ALL_SECTIONS: ConfigSection[] = [
 
 export const DEFAULT_SWITCH: SwitchConfig = {
   actuation: 1.2,
+  releasePoint: 1.2,
   rapidTrigger: false,
   rtPress: 0.15,
   rtRelease: 0.15,
-  continuousRT: false,
   deadzoneTop: 0.1,
   deadzoneBottom: 0.1,
 };

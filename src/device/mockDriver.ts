@@ -19,7 +19,13 @@ export class MockDriver implements KeyboardDriver {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as DeviceConfig;
-        if (parsed.version === 2) return parsed;
+        if (parsed.version === 2) {
+          // Ältere Demo-Daten kennen den Rückstellpunkt noch nicht → wie Auslösepunkt
+          for (const p of parsed.profiles) {
+            for (const s of [p.defaultSwitch, ...Object.values(p.switches)]) s.releasePoint ??= s.actuation;
+          }
+          return parsed;
+        }
       }
     } catch {
       // ungültige oder blockierte Daten → Standardwerte

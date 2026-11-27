@@ -343,6 +343,7 @@ export function decodeKeyMatrix(bytes: ArrayLike<number>): (string | undefined)[
 /** Schalterwerte einer Taste in mm (strukturgleich mit SwitchConfig im Modell) + rohes Modusbyte. */
 export interface KeySwitchValues {
   actuation: number;
+  releasePoint: number;
   rapidTrigger: boolean;
   rtPress: number;
   rtRelease: number;
@@ -354,6 +355,7 @@ export interface KeySwitchValues {
 
 export const SWITCH_LIMITS = {
   actuation: [0.1, 3.4],
+  releasePoint: [0.1, 3.4],
   rtPress: [0.01, 2],
   rtRelease: [0.01, 2],
   deadzoneTop: [0, 1],
@@ -382,7 +384,7 @@ export function keySwitchPackets(slot: number, from: KeySwitchValues, to: KeySwi
     ops.push({ kind: MAGNETISM.modes, data: [(from.modeByte & 0x7f) | (to.rapidTrigger ? 0x80 : 0)] });
   }
   const travels: [keyof typeof SWITCH_LIMITS, number][] = [
-    ['actuation', MAGNETISM.travel], ['deadzoneBottom', MAGNETISM.deadzoneBottom],
+    ['actuation', MAGNETISM.travel], ['releasePoint', MAGNETISM.release], ['deadzoneBottom', MAGNETISM.deadzoneBottom],
     ['rtPress', MAGNETISM.rtPress], ['rtRelease', MAGNETISM.rtRelease],
   ];
   for (const [field, kind] of travels) {
@@ -398,6 +400,7 @@ export const mmToRaw = (mm: number) => Math.round(mm * TRAVEL_STEP);
 export interface SwitchTables {
   modes: number[];
   travel: number[];
+  release: number[];
   rtPress: number[];
   rtRelease: number[];
   deadzoneBottom: number[];
@@ -408,13 +411,14 @@ const BULK_CHUNK = 56;
 
 /**
  * Sammelschreiben (GearHub setMultiMagnetismInfo): je geänderter Tabelle `65 <Art> 01 <Seite> <Ende>` + 56 Byte.
- * Reihenfolge wie GearHub: Modus, Wege (0, 2, 3, 6), obere Totzone. Nur das allerletzte Paket trägt Ende = 1.
+ * Reihenfolge wie GearHub: Modus, Wege (0, 1, 2, 3, 6), obere Totzone. Nur das allerletzte Paket trägt Ende = 1.
  */
 export function bulkSwitchPackets(from: SwitchTables, to: SwitchTables): { kind: number; packets: Uint8Array[] }[] {
   const u16 = (v: number[]) => v.flatMap((x) => [x & 0xff, (x >> 8) & 0xff]);
   const tables: [number, keyof SwitchTables, (v: number[]) => number[]][] = [
     [MAGNETISM.modes, 'modes', (v) => v],
     [MAGNETISM.travel, 'travel', u16],
+    [MAGNETISM.release, 'release', u16],
     [MAGNETISM.rtPress, 'rtPress', u16],
     [MAGNETISM.rtRelease, 'rtRelease', u16],
     [MAGNETISM.deadzoneBottom, 'deadzoneBottom', u16],

@@ -36,8 +36,8 @@ const isConfigInterface = (d: HIDDevice) => isUsbConfig(d) || isBtConfig(d) || i
 type SwitchChange = { key: string; to: SwitchConfig; packets: Uint8Array[] };
 /** Bis zu so vielen geänderten Tasten wird einzeln geschrieben, darüber als Sammelschreiben (ganze Tabellen). */
 const MAX_SWITCH_KEYS = 5;
-/** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 4×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
-const SWITCH_READ_OPS = 28;
+/** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 5×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
+const SWITCH_READ_OPS = 32;
 const READ_OPS = 6 + SWITCH_READ_OPS;
 const SECTION_LABEL: Partial<Record<ConfigSection, string>> = { lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter' };
 const KEY_WRITE_GAP_MS = 150;
@@ -122,7 +122,7 @@ export class GamakayHidDriver implements KeyboardDriver {
   }
   /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
   private keySlots: Record<string, number> = {};
-  private switchState: Record<string, KeySwitchValues & { continuousRT: boolean }> = {};
+  private switchState: Record<string, KeySwitchValues> = {};
   /** Zuletzt gelesene Rohtabellen aller 128 Plätze (Grundlage fürs Sammelschreiben). */
   private switchTables: SwitchTables | null = null;
 
@@ -274,6 +274,7 @@ export class GamakayHidDriver implements KeyboardDriver {
       decodeU16List(await this.readPages((p) => magnetismReadPacket(kind, p), 4, label));
     const modes = await this.readPages((p) => magnetismReadPacket(MAGNETISM.modes, p), 2, 'Tastenmodus');
     const travel = await u16(MAGNETISM.travel, 'Auslösepunkt');
+    const release = await u16(MAGNETISM.release, 'Rückstellpunkt');
     const rtPress = await u16(MAGNETISM.rtPress, 'RT Drücken');
     const rtRelease = await u16(MAGNETISM.rtRelease, 'RT Loslassen');
     const dzBottom = await u16(MAGNETISM.deadzoneBottom, 'Totzone unten');
@@ -282,6 +283,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     this.switchTables = {
       modes: Array.from(modes.subarray(0, 128)),
       travel: travel.slice(0, 128),
+      release: release.slice(0, 128),
       rtPress: rtPress.slice(0, 128),
       rtRelease: rtRelease.slice(0, 128),
       deadzoneBottom: dzBottom.slice(0, 128),
@@ -296,10 +298,10 @@ export class GamakayHidDriver implements KeyboardDriver {
       this.keySlots[key] = i;
       perKey[key] = {
         actuation: mm(travel[i]),
+        releasePoint: mm(release[i]),
         rapidTrigger: decodeKeyMode(modes[i]).rapidTrigger,
         rtPress: mm(rtPress[i]),
         rtRelease: mm(rtRelease[i]),
-        continuousRT: false, // noch nicht entschlüsselt
         deadzoneTop: mm(dzTop[i]),
         deadzoneBottom: mm(dzBottom[i]),
       };
@@ -315,7 +317,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     profile.switches = Object.fromEntries(Object.entries(perKey).filter(([, s]) => JSON.stringify(s) !== top[0]));
 
     const d = profile.defaultSwitch;
-    log('info', `Gelesen: ${Object.keys(perKey).length} Tasten, Standard Auslösepunkt ${d.actuation} mm, ` +
+    log('info', `Gelesen: ${Object.keys(perKey).length} Tasten, Standard Auslösepunkt ${d.actuation} mm, Rückstellpunkt ${d.releasePoint} mm, ` +
       `RT ${d.rapidTrigger ? `an (${d.rtPress}/${d.rtRelease} mm)` : 'aus'}, Totzone ${d.deadzoneTop}/${d.deadzoneBottom} mm, ` +
       `${Object.keys(profile.switches).length} Tasten abweichend: ${Object.keys(profile.switches).slice(0, 8).join(', ')}`);
     // Leere Plätze (00 00 00 00) sind Lücken in der Matrix; nur belegte, aber unbekannte Einträge melden.
@@ -328,13 +330,12 @@ export class GamakayHidDriver implements KeyboardDriver {
 
   /**
    * Schalterwerte schreiben: nur Tasten, die vom gelesenen Stand abweichen. Wenige Tasten einzeln,
-   * viele als Sammelschreiben der geänderten Tabellen (beides wie GearHub). Continuous RT ist noch nicht schreibbar.
+   * viele als Sammelschreiben der geänderten Tabellen (beides wie GearHub).
    */
   private async writeSwitches(profile: Profile): Promise<void> {
     if (!Object.keys(this.switchState).length) throw new Error('Schalterwerte wurden noch nicht gelesen.');
     const changes = Object.entries(this.switchState).flatMap(([key, from]) => {
       const to = switchFor(profile, key);
-      if (to.continuousRT !== from.continuousRT) throw new Error('Continuous RT kann noch nicht geschrieben werden.');
       const packets = keySwitchPackets(this.keySlots[key], from, { ...to, modeByte: from.modeByte });
       return packets.length ? [{ key, to, packets }] : [];
     });
@@ -373,6 +374,7 @@ export class GamakayHidDriver implements KeyboardDriver {
       const i = this.keySlots[key];
       to.modes[i] = newModeByte(this.switchState[key], v.rapidTrigger);
       to.travel[i] = mmToRaw(v.actuation);
+      to.release[i] = mmToRaw(v.releasePoint);
       to.rtPress[i] = mmToRaw(v.rtPress);
       to.rtRelease[i] = mmToRaw(v.rtRelease);
       to.deadzoneBottom[i] = mmToRaw(v.deadzoneBottom);
@@ -399,7 +401,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     this.addOps(changes.reduce((n, c) => n + c.packets.length, 0) + SWITCH_READ_OPS);
     for (const [n, { key, to, packets }] of changes.entries()) {
       this.progress(`Schreibe ${key} (${n + 1}/${changes.length}) …`);
-      log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, ` +
+      log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, Rückstellen ${to.releasePoint} mm, ` +
         `RT ${to.rapidTrigger ? `an ${to.rtPress}/${to.rtRelease}` : 'aus'}, Totzone ${to.deadzoneTop}/${to.deadzoneBottom} mm`);
       for (const p of packets) await this.transport.write(p);
       // Nach dem Ende-Kennzeichen speichert die Tastatur; Pakete in dieser Zeit gehen verloren

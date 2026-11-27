@@ -145,8 +145,8 @@ export function App() {
             {driver.writableSections && (
               <div className="banner">
                 Verbunden mit <strong>{driver.info.name}</strong> ({driver.info.firmware ?? 'Firmware unbekannt'}). Vom Gerät
-                gelesen und schreibbar: Licht, Seitenlicht, Geräteeinstellungen sowie Auslösepunkt, Rapid Trigger und Totzonen
-                (bis 5 Tasten je Übernehmen). Tastenbelegung, Makros und Display sind noch Standardwerte.
+                gelesen und schreibbar: Licht, Seitenlicht, Geräteeinstellungen sowie Auslöse- und Rückstellpunkt, Rapid Trigger
+                und Totzonen. Tastenbelegung, Makros und Display sind noch Standardwerte.
               </div>
             )}
             {WITH_KEYBOARD.includes(view) && <Stage pressed={[]} />}

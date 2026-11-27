@@ -214,7 +214,7 @@ Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten
   Reihenfolge ist **spaltenweise**: 0 Esc, 1 ^, 2 Tab, 3 Caps, 4 Shift, 5 Strg, 6 F1, 7 1, 8 Q, 9 A, 10 ISO <, 11 Win …
   Plätze 96–98: `13 01 00/01/03` (vermutlich Drehknopf). 82 Tasten erkannt.
 - **Magnet** `e5 <Art> 01 <Seite>`: u16 LE je Platz (4 Seiten) bzw. 1 Byte je Platz (Art 7 und fb, 2 Seiten).
-  Art 0 Auslösepunkt, 1 Rückstellpunkt (noch nicht gelesen), 2/3 RT Drücken/Loslassen, 6 Totzone unten,
+  Art 0 Auslösepunkt, 1 Rückstellpunkt, 2/3 RT Drücken/Loslassen, 6 Totzone unten,
   7 Tastenmodus (Bit 7 = RT), fb Totzone oben.
 - **Faktor 100 = 1 mm** (Firmware 0x0403), bestätigt: Rohwert `c8` = 200 → GearHub zeigt 2,00 mm.
 - Über alle drei Wege geprüft, identische Werte: Kabel ~0,5 s, Bluetooth ~0,7 s (Antwort mit Präfix `55`), Empfänger ~2,9 s.
@@ -246,7 +246,17 @@ Reihenfolge Art 7, 0, 2, 3, 6, fb; nur das **allerletzte** Paket der ganzen Folg
 - Bluetooth-Trennung: Nach ~1,5 min ohne Befehle war die BT-Verbindung einmal weg; `sendReport` kehrte dann nie zurück,
   nichts wurde übernommen (ohne Ende-Kennzeichen speichert die Tastatur nicht). Die App bricht das Senden jetzt nach 3 s mit Fehler ab.
 
+## Rückstellpunkt (Art 1) und „Continuous RT“ (2026-11-27, alle drei Wege geprüft)
+
+- Art 1 = GearHub `liftTravel` („抬起行程“): ab dieser Höhe gilt die Taste beim Hochkommen als losgelassen; nur ohne RT.
+  Werkszustand = Auslösepunkt (2,00 mm). GearHub zeigt „getrennt einstellen“, sobald Art 0 ≠ Art 1 (bei RT immer aus).
+  Leere Plätze lesen `ff ff`; GearHub füllt beim Sammelschreiben unbenutzte Plätze mit 280 (die App lässt sie, wie gelesen).
+- Einzelschreiben: Art 1 direkt nach Art 0 (Reihenfolge 7, 0, 1, 6, 2, 3, fb). Sammelschreiben: Tabelle 1 nach Tabelle 0.
+- Geprüft: F12 2,00 → 1,50 → 2,00 mm und alle 82 Tasten 2,00 → 1,80 → 2,00 mm (5 Pakete) inkl. Kontroll-Lesen:
+  Kabel ~2,4 s, Bluetooth ~2,0–2,4 s, Empfänger ~7 s.
+- „Continuous RT“ gibt es bei der TK75 nicht getrennt: GearHub nennt den normalen RT-Schalter (Bit 7 im Modusbyte)
+  „Full Travel Continuous Rapid Trigger“ (`getIs全程连续快速触发RT` = `RT开启`).
+
 ## Offen / nächste Mitschnitte
 
-1. Rückstellpunkt (Art 1), Continuous RT.
-2. Tastenbelegung schreiben (`0a`).
+1. Tastenbelegung schreiben (`0a`).

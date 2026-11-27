@@ -170,7 +170,7 @@ test('Magnetwerte u16 LE und Modusbyte', () => {
   assert.deepEqual(decodeKeyMode(0x02), { mode: 2, rapidTrigger: false });
 });
 
-const BASE = { actuation: 2, rapidTrigger: false, rtPress: 0.3, rtRelease: 0.3, deadzoneTop: 0, deadzoneBottom: 0.3, modeByte: 0 };
+const BASE = { actuation: 2, releasePoint: 2, rapidTrigger: false, rtPress: 0.3, rtRelease: 0.3, deadzoneTop: 0, deadzoneBottom: 0.3, modeByte: 0 };
 
 test('Schalter schreiben: nur Auslösepunkt geändert → ein Paket 65 00 00 <Platz> 01 + u16', () => {
   const [p, ...rest] = keySwitchPackets(69, BASE, { ...BASE, actuation: 1.5 });
@@ -193,7 +193,7 @@ test('Schalter schreiben: keine Änderung → keine Pakete; Grenzen werden gepr�
 
 test('Sammelschreiben: nur geänderte Tabellen, 5 Seiten bei u16, Ende nur am allerletzten Paket', () => {
   const fill = (v: number) => Array(128).fill(v);
-  const from = { modes: fill(0), travel: fill(200), rtPress: fill(30), rtRelease: fill(30), deadzoneBottom: fill(30), deadzoneTop: fill(0) };
+  const from = { modes: fill(0), travel: fill(200), release: fill(200), rtPress: fill(30), rtRelease: fill(30), deadzoneBottom: fill(30), deadzoneTop: fill(0) };
   const to = { ...from, travel: fill(180), modes: fill(0x80) };
   const out = bulkSwitchPackets(from, to);
   assert.deepEqual(out.map((o) => [o.kind, o.packets.length]), [[7, 3], [0, 5]]);
@@ -205,4 +205,14 @@ test('Sammelschreiben: nur geänderte Tabellen, 5 Seiten bei u16, Ende nur am al
   assert.equal(all[7][8 + 31], 0);
   assert.equal(all[7][8 + 32], 0);
   assert.deepEqual(bulkSwitchPackets(from, { ...from }), []);
+});
+
+test('Rückstellpunkt: Einzelpaket Art 1 nach dem Auslösepunkt, Sammelschreiben nach Tabelle 0', () => {
+  const ps = keySwitchPackets(5, BASE, { ...BASE, actuation: 1.5, releasePoint: 1.2 });
+  assert.deepEqual(ps.map((p) => [p[1], p[3], p[4], p[8], p[9]]), [[0, 5, 0, 150, 0], [1, 5, 1, 120, 0]]);
+  assert.throws(() => keySwitchPackets(5, BASE, { ...BASE, releasePoint: 0 }));
+  const fill = (v: number) => Array(128).fill(v);
+  const from = { modes: fill(0), travel: fill(200), release: fill(200), rtPress: fill(30), rtRelease: fill(30), deadzoneBottom: fill(30), deadzoneTop: fill(0) };
+  const out = bulkSwitchPackets(from, { ...from, travel: fill(150), release: fill(120) });
+  assert.deepEqual(out.map((o) => [o.kind, o.packets.length]), [[0, 5], [1, 5]]);
 });
