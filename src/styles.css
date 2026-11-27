@@ -273,3 +273,22 @@ input[type='color'] { width: 44px; height: 32px; border: 1px solid var(--border)
 .battery-icon { width: 22px; height: 11px; border: 1.5px solid currentColor; border-radius: 3px; padding: 1px; position: relative; display: inline-block; }
 .battery-icon::after { content: ''; position: absolute; right: -4px; top: 2px; width: 2px; height: 5px; background: currentColor; border-radius: 1px; }
 .battery-icon > span { display: block; height: 100%; background: currentColor; border-radius: 1px; }
+
+/* Globale Statusanzeige: Laufbalken oben, Arbeitsschritt in der Kopfleiste, Bearbeitung gesperrt */
+.activity-bar { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 70; overflow: hidden; opacity: 0; background: rgba(139, 124, 246, 0.25); transition: opacity .2s; pointer-events: none; }
+.activity-bar.on { opacity: 1; }
+.activity-bar::before { content: ''; position: absolute; top: 0; bottom: 0; width: 35%; background: linear-gradient(90deg, transparent, var(--accent-strong) 30%, #fff 50%, var(--accent-strong) 70%, transparent); animation: activity-slide 1.1s ease-in-out infinite; }
+@keyframes activity-slide { from { left: -35%; } to { left: 100%; } }
+.status-pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 11px; border-radius: 999px; background: var(--surface-2); color: var(--text-dim); white-space: nowrap; margin: 0; }
+.status-pill.busy { color: var(--accent-strong); }
+.status-pill.ok { color: var(--ok); background: rgba(61, 220, 132, 0.12); }
+.spinner { width: 11px; height: 11px; border-radius: 50%; border: 2px solid currentColor; border-right-color: transparent; animation: spin .7s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.main.busy > :not(.topbar) { pointer-events: none; opacity: .6; transition: opacity .2s; }
+@media (prefers-reduced-motion: reduce) {
+  .activity-bar::before { animation-duration: 3s; }
+  .spinner { animation-duration: 2s; }
+}
+.activity-bar.known::before { display: none; }
+.activity-bar > span { position: absolute; top: 0; bottom: 0; left: 0; background: var(--accent-strong); box-shadow: 0 0 8px var(--accent); transition: width .25s ease-out; }
+.status-pct { font-variant-numeric: tabular-nums; min-width: 3.2em; text-align: right; color: var(--text); font-weight: 600; }

@@ -34,6 +34,10 @@ const isDongleConfig = (d: HIDDevice) =>
   d.collections.some((c) => c.usagePage === CONFIG_USAGE_PAGE && c.usage === CONFIG_USAGE);
 const isConfigInterface = (d: HIDDevice) => isUsbConfig(d) || isBtConfig(d) || isDongleConfig(d);
 const MAX_SWITCH_KEYS = 5;
+/** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 4×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
+const SWITCH_READ_OPS = 28;
+const READ_OPS = 6 + SWITCH_READ_OPS;
+const SECTION_LABEL: Partial<Record<ConfigSection, string>> = { lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter' };
 const KEY_WRITE_GAP_MS = 150;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 GHz' } as const;
@@ -57,15 +61,72 @@ export class GamakayHidDriver implements KeyboardDriver {
   private side: LedState | null = null;
   /** Zuletzt gelesene/geschriebene Geräteeinstellungen (zum Erkennen, was sich ändert) */
   private settings: DeviceSettings | null = null;
+  onProgress?: (step: string, percent?: number) => void;
+  /**
+   * Fortschritt: Jeder Befehl an die Tastatur zählt; die Gesamtzahl steht vorher fest (Lesen = READ_OPS,
+   * Schreiben = Pakete + Kontroll-Lesen + das anschließende Neu-Lesen durch den Store).
+   */
+  private job: { done: number; total: number; step: string; shown: number } | null = null;
+  /** Fester Text für zusammengefasste Schritte (Kontroll-Lesen, Neu-Lesen nach dem Schreiben) */
+  private stepLabel: string | null = null;
+  private progress(step: string) {
+    const shown = this.stepLabel ?? step;
+    if (this.job) this.job.step = shown;
+    this.emitProgress(shown);
+  }
+  private emitProgress(step: string) {
+    const j = this.job;
+    if (!j) return this.onProgress?.(step);
+    j.shown = Math.max(j.shown, Math.min(99, Math.round((j.done / Math.max(1, j.total)) * 100)));
+    this.onProgress?.(step, j.shown);
+  }
+  private tick() {
+    if (!this.job) return;
+    this.job.done++;
+    this.emitProgress(this.job.step);
+  }
+  private addOps(n: number) {
+    if (this.job) this.job.total += n;
+  }
+  private endJob() {
+    if (this.job) this.onProgress?.(this.job.step, 100);
+    this.job = null;
+  }
+  /** Transport-Hülle, die jeden Befehl für den Fortschritt mitzählt. */
+  private counted(t: Transport): Transport {
+    const tick = () => this.tick();
+    return {
+      get device() {
+        return t.device;
+      },
+      open: () => t.open(),
+      close: () => t.close(),
+      readBattery: () => t.readBattery(),
+      query: async (cmd) => {
+        const r = await t.query(cmd);
+        tick();
+        return r;
+      },
+      queryRaw: async (packet) => {
+        const r = await t.queryRaw(packet);
+        tick();
+        return r;
+      },
+      write: async (packet) => {
+        await t.write(packet);
+        tick();
+      },
+    };
+  }
   /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
   private keySlots: Record<string, number> = {};
   private switchState: Record<string, KeySwitchValues & { continuousRT: boolean }> = {};
 
   private constructor(device: HIDDevice) {
     const transport = isBtConfig(device) ? 'bt' : isDongleConfig(device) ? 'dongle' : 'usb';
-    this.transport = transport === 'bt' ? new BtTransport(device)
+    this.transport = this.counted(transport === 'bt' ? new BtTransport(device)
       : transport === 'dongle' ? new DongleTransport(device)
-      : new GamakayTransport(device);
+      : new GamakayTransport(device));
     this.info = {
       // Über den Empfänger meldet sich das Gerät als „2.4G Wireless Keyboard“
       name: transport === 'dongle' || !device.productName ? 'TK75 TMR' : device.productName,
@@ -119,9 +180,23 @@ export class GamakayHidDriver implements KeyboardDriver {
   }
 
   async readConfig(): Promise<DeviceConfig> {
+    // Nach dem Schreiben ist das Neu-Lesen schon im Fortschritt eingeplant; sonst eigener Ablauf.
+    const afterWrite = !!this.job;
+    if (!this.job) this.job = { done: 0, total: READ_OPS, step: '', shown: 0 };
+    if (afterWrite) this.stepLabel = 'Lade aktuellen Stand …';
+    try {
+      return await this.readConfigInner();
+    } finally {
+      this.stepLabel = null;
+      this.endJob();
+    }
+  }
+
+  private async readConfigInner(): Promise<DeviceConfig> {
     const cfg = createDefaultConfig(this.capabilities.profiles);
     const t = this.transport;
 
+    this.progress('Lese Geräteinfo und Licht …');
     const version = await t.query(CMD.GET_VERSION);
     const info = await t.query(CMD.GET_INFO);
     this.info.firmware = `${decodeInfoName(info) || '?'} · ${decodeVersion(version)}`;
@@ -187,7 +262,9 @@ export class GamakayHidDriver implements KeyboardDriver {
 
   /** Tastenzuordnung (8A) + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
   private async readSwitches(profile: Profile): Promise<void> {
+    this.progress('Lese Tastenzuordnung …');
     const matrix = await this.readPages((p) => keyMatrixReadPacket(0, p), 8, 'Matrix');
+    this.progress('Lese Schalterwerte …');
     const slots = decodeKeyMatrix(matrix);
     const u16 = async (kind: number, label: string) =>
       decodeU16List(await this.readPages((p) => magnetismReadPacket(kind, p), 4, label));
@@ -250,10 +327,12 @@ export class GamakayHidDriver implements KeyboardDriver {
       return packets.length ? [{ key, to, packets }] : [];
     });
     if (!changes.length) return;
+    this.addOps(changes.reduce((n, c) => n + c.packets.length, 0) + SWITCH_READ_OPS);
     if (changes.length > MAX_SWITCH_KEYS) {
       throw new Error(`Testphase: höchstens ${MAX_SWITCH_KEYS} Tasten auf einmal (geändert: ${changes.length}).`);
     }
-    for (const { key, to, packets } of changes) {
+    for (const [n, { key, to, packets }] of changes.entries()) {
+      this.progress(`Schreibe ${key} (${n + 1}/${changes.length}) …`);
       log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, ` +
         `RT ${to.rapidTrigger ? `an ${to.rtPress}/${to.rtRelease}` : 'aus'}, Totzone ${to.deadzoneTop}/${to.deadzoneBottom} mm`);
       for (const p of packets) await this.transport.write(p);
@@ -269,13 +348,31 @@ export class GamakayHidDriver implements KeyboardDriver {
     // GearHub wartet danach (vendorSleep, bei Sammelschreiben 500 ms); vorher liefert die Tastatur nur Echos.
     await sleep(500);
     // Nachlesen: Die Tastatur bestätigt Schreibbefehle nicht, verlorene Pakete fielen sonst nicht auf.
+    this.progress('Prüfe, ob alles angekommen ist …');
     const check = structuredClone(profile);
-    await this.readSwitches(check);
+    this.stepLabel = 'Prüfe, ob alles angekommen ist …';
+    try {
+      await this.readSwitches(check);
+    } finally {
+      this.stepLabel = null;
+    }
     const lost = changes.filter(({ key, to }) => JSON.stringify(switchFor(check, key)) !== JSON.stringify(to)).map((c) => c.key);
     if (lost.length) throw new Error(`Nicht von der Tastatur übernommen: ${lost.join(', ')} – bitte erneut „Übernehmen“.`);
   }
 
   async writeSection(section: ConfigSection, config: DeviceConfig): Promise<void> {
+    // Fortschritt beginnt mit dem Neu-Lesen, das der Store nach dem Schreiben macht; jeder Bereich addiert seine Pakete.
+    if (!this.job) this.job = { done: 0, total: READ_OPS, step: '', shown: 0 };
+    try {
+      await this.writeSectionInner(section, config);
+    } catch (e) {
+      this.endJob();
+      throw e;
+    }
+  }
+
+  private async writeSectionInner(section: ConfigSection, config: DeviceConfig): Promise<void> {
+    this.progress(`Schreibe ${SECTION_LABEL[section] ?? section} …`);
     if (section === 'settings') return this.writeSettings(config.settings);
     if (section === 'switches') return this.writeSwitches(config.profiles[config.activeProfile]);
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
@@ -303,6 +400,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (!keyPacket && !sideChanged && !this.userSide) {
       throw new Error('Der aktuelle Geräte-Effekt ist unbekannt – bitte zuerst einen Effekt aus der Liste wählen.');
     }
+    this.addOps(Number(keyChanged) + Number(sideChanged));
 
     if (keyPacket && keyChanged) {
       await this.transport.write(keyPacket);
@@ -334,6 +432,7 @@ export class GamakayHidDriver implements KeyboardDriver {
       })
       : null;
     const rate = wanted.pollingRate !== cur.pollingRate ? reportRatePacket(wanted.pollingRate) : null;
+    this.addOps(Number(!!rate) + Number(!!sleep));
     if (rate) {
       await this.transport.write(rate);
       await new Promise((r) => setTimeout(r, 300)); // GearHub: kurze Pause nach dem Umschalten

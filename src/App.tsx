@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { HidChooser } from './components/HidChooser';
 import { KeyboardView } from './components/KeyboardView';
 import { useBatteryWatcher } from './components/useBatteryWatcher';
-import { IconRail, Sidebar, TopBar, Welcome } from './components/Shell';
+import { ActivityBar, IconRail, Sidebar, TopBar, Welcome } from './components/Shell';
 import { LAYOUTS } from './device/layout';
 import type { KeyId } from './device/model';
 import { AdvancedPanel } from './panels/AdvancedPanel';
@@ -56,7 +56,8 @@ function useShortcuts() {
       const target = e.target as HTMLElement | null;
       if (target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return;
       if (!(e.ctrlKey || e.metaKey)) return;
-      const { undo, redo, view } = useApp.getState();
+      const { undo, redo, view, busy } = useApp.getState();
+      if (busy) return; // während die Tastatur beschrieben wird, nichts ändern
       if (view === 'diagnose') return;
       if (e.key.toLowerCase() === 'z' && !e.shiftKey) { e.preventDefault(); undo(); }
       else if (e.key.toLowerCase() === 'y' || (e.key.toLowerCase() === 'z' && e.shiftKey)) { e.preventDefault(); redo(); }
@@ -116,6 +117,7 @@ export function App() {
   const driver = useApp((s) => s.driver);
   const view = useApp((s) => s.view);
   const error = useApp((s) => s.error);
+  const busy = useApp((s) => s.busy);
   const dismissError = useApp((s) => s.dismissError);
   const isDiag = view === 'diagnose';
   const pressed = useKeyTester(isDiag);
@@ -126,9 +128,10 @@ export function App() {
 
   return (
     <div className="app">
+      <ActivityBar />
       <IconRail />
       {!isDiag && <Sidebar />}
-      <main className="main">
+      <main className={`main ${busy ? 'busy' : ''}`} aria-busy={busy}>
         {isDiag ? (
           <>
             <Stage pressed={pressed} />
@@ -142,8 +145,8 @@ export function App() {
             {driver.writableSections && (
               <div className="banner">
                 Verbunden mit <strong>{driver.info.name}</strong> ({driver.info.firmware ?? 'Firmware unbekannt'}). Vom Gerät
-                gelesen: Licht und Energiespar-Zeiten – alles andere sind noch Standardwerte. Schreiben kann die App bisher
-                nur das <strong>Tastenlicht</strong> (Effekt, Tempo, Helligkeit, Farbe).
+                gelesen und schreibbar: Licht, Seitenlicht, Geräteeinstellungen sowie Auslösepunkt, Rapid Trigger und Totzonen
+                (bis 5 Tasten je Übernehmen). Tastenbelegung, Makros und Display sind noch Standardwerte.
               </div>
             )}
             {WITH_KEYBOARD.includes(view) && <Stage pressed={[]} />}

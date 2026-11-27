@@ -40,6 +40,8 @@ export interface KeyboardDriver {
   readBattery?(): Promise<number | null>;
   /** Seitenlicht überlagern (Akkuanzeige); null stellt die eigene Einstellung `own` wieder her. */
   setSideOverride?(override: LightingConfig['side'] | null, own: LightingConfig['side']): Promise<void>;
+  /** Wird vom Store gesetzt: aktueller Arbeitsschritt für die Statusanzeige (z. B. „Schreibe F10 (2/4) …“). */
+  onProgress?: (step: string, percent?: number) => void;
 }
 
 export const TK75_CAPABILITIES: Capabilities = {

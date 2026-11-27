@@ -230,6 +230,7 @@ Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten
   Die App wartet 150 ms und liest danach zur Kontrolle nach (die Tastatur bestätigt nichts).
 - Direkt nach dem Schreiben antwortet sie einige 100 ms lang nur mit dem Echo der Anfrage → 500 ms warten.
   Achtung: `83` bei 8000 Hz sieht genauso aus wie ein Echo (lauter Nullen).
+- Über alle drei Wege geprüft (F12: 1,5 mm + RT 0,1/0,1 und zurück): Kabel ~1 s, Bluetooth ~2,1 s, Empfänger ~6 s je Übernehmen inkl. Kontroll-Lesen.
 - Sammelschreiben (`65 <Art> 01 <Seite> <Ende>` + 56 Byte je Seite) ist noch nicht genutzt; die App erlaubt bis 5 Tasten pro Übernehmen.
 
 ## Offen / nächste Mitschnitte

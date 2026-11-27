@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { MockDriver } from '../device/mockDriver';
 import { GamakayHidDriver } from '../device/hidDriver';
 import { useApp, useDirtySections, type View } from '../store';
@@ -83,6 +83,43 @@ export function Sidebar() {
   );
 }
 
+/** Dünner Laufbalken ganz oben, solange die App mit der Tastatur spricht. */
+export function ActivityBar() {
+  const busy = useApp((s) => s.busy);
+  const progress = useApp((s) => s.progress);
+  const known = busy && progress !== null;
+  return (
+    <div className={`activity-bar ${busy ? 'on' : ''} ${known ? 'known' : ''}`} aria-hidden="true">
+      {known && <span style={{ width: `${progress}%` }} />}
+    </div>
+  );
+}
+
+/** Aktueller Arbeitsschritt bzw. kurze Bestätigung nach dem Speichern. */
+function StatusPill() {
+  const activity = useApp((s) => s.activity);
+  const progress = useApp((s) => s.progress);
+  const savedAt = useApp((s) => s.savedAt);
+  const [showSaved, setShowSaved] = useState(false);
+  useEffect(() => {
+    if (!savedAt) return;
+    setShowSaved(true);
+    const id = setTimeout(() => setShowSaved(false), 2500);
+    return () => clearTimeout(id);
+  }, [savedAt]);
+  if (activity) {
+    return (
+      <span className="status-pill busy" role="status">
+        <span className="spinner" />
+        {activity}
+        {progress !== null && <strong className="status-pct">{progress} %</strong>}
+      </span>
+    );
+  }
+  if (showSaved) return <span className="status-pill ok" role="status">✓ Auf Tastatur gespeichert</span>;
+  return null;
+}
+
 export function TopBar() {
   const config = useApp((s) => s.config);
   const driver = useApp((s) => s.driver);
@@ -98,6 +135,7 @@ export function TopBar() {
     <header className="topbar">
       <select
         className="profile-select"
+        disabled={busy}
         value={config.activeProfile}
         onChange={(e) => edit((d) => void (d.activeProfile = Number(e.target.value)))}
       >
@@ -106,22 +144,23 @@ export function TopBar() {
         ))}
       </select>
       <div className="spacer" />
+      <StatusPill />
       {battery !== null && (
         <span className={`battery-badge ${battery <= 20 ? 'low' : ''}`} title="Akkustand">
           <span className="battery-icon"><span style={{ width: `${battery}%` }} /></span>
           {battery} %
         </span>
       )}
-      <button className="icon-btn" disabled={!past} onClick={undo} title="Rückgängig (Strg+Z)"><Icon name="undo" /></button>
-      <button className="icon-btn" disabled={!future} onClick={redo} title="Wiederholen (Strg+Y)"><Icon name="redo" /></button>
-      {dirty.length > 0 && <button className="btn ghost" onClick={revert}>Verwerfen</button>}
+      <button className="icon-btn" disabled={!past || busy} onClick={undo} title="Rückgängig (Strg+Z)"><Icon name="undo" /></button>
+      <button className="icon-btn" disabled={!future || busy} onClick={redo} title="Wiederholen (Strg+Y)"><Icon name="redo" /></button>
+      {dirty.length > 0 && <button className="btn ghost" disabled={busy} onClick={revert}>Verwerfen</button>}
       <button
         className="btn primary"
         disabled={!dirty.length || busy || !canWrite}
         title={canWrite ? dirty.join(', ') : 'Schreiben ist für dieses Gerät noch nicht implementiert'}
         onClick={apply}
       >
-        {busy ? 'Schreibe …' : dirty.length ? `Übernehmen (${dirty.length})` : 'Gespeichert'}
+        {busy ? 'Bitte warten …' : dirty.length ? `Übernehmen (${dirty.length})` : 'Gespeichert'}
       </button>
     </header>
   );
@@ -130,6 +169,8 @@ export function TopBar() {
 export function Welcome() {
   const connect = useApp((s) => s.connect);
   const busy = useApp((s) => s.busy);
+  const activity = useApp((s) => s.activity);
+  const progress = useApp((s) => s.progress);
   const [error, setError] = useState<string | null>(null);
 
   async function connectUsb() {
@@ -152,10 +193,17 @@ export function Welcome() {
         <button className="btn" disabled={busy} onClick={() => connect(new MockDriver())}>Demo-Modus</button>
         <button className="btn primary" disabled={busy} onClick={connectUsb}>Tastatur verbinden</button>
       </div>
+      {busy && activity && (
+        <p className="status-pill busy" role="status">
+          <span className="spinner" />
+          {activity}
+          {progress !== null && <strong className="status-pct">{progress} %</strong>}
+        </p>
+      )}
       {error && <p className="error-text">{error}</p>}
       <p className="hint">
-        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst
-        Tasten- und Seitenlicht. Kabellos zeigt sie zusätzlich den Akkustand. Bitte GearHub vorher schließen.
+        Mit der echten Tastatur liest und schreibt die App Licht, Seitenlicht, Polling-Rate, Energiespar-Zeiten sowie
+        Auslösepunkt, Rapid Trigger und Totzonen. Kabellos zeigt sie zusätzlich den Akkustand. Bitte GearHub vorher schließen.
       </p>
     </div>
   );

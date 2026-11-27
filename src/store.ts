@@ -51,6 +51,12 @@ interface AppState {
   layout: LayoutVariant;
   selected: KeyId[];
   busy: boolean;
+  /** Was gerade mit der Tastatur passiert (für die globale Statusanzeige); null = nichts */
+  activity: string | null;
+  /** Fortschritt der laufenden Aktion in Prozent (falls der Treiber ihn kennt) */
+  progress: number | null;
+  /** Zeitpunkt der letzten erfolgreichen Übernahme (kurze Bestätigung in der Statusanzeige) */
+  savedAt: number | null;
   error: string | null;
   /** Licht-Vorschau: zufällige Tastendrücke für reaktive Effekte simulieren */
   previewSimulate: boolean;
@@ -88,6 +94,9 @@ export const useApp = create<AppState>((set, get) => ({
   layout: loadLayout(),
   selected: [],
   busy: false,
+  activity: null,
+  progress: null,
+  savedAt: null,
   error: null,
   previewSimulate: true,
   battery: null,
@@ -105,7 +114,8 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   async connect(driver) {
-    set({ busy: true, error: null });
+    set({ busy: true, activity: 'Verbinde …', progress: null, savedAt: null, error: null });
+    driver.onProgress = (step, percent) => set({ activity: step, progress: percent ?? null });
     try {
       const cfg = await driver.readConfig();
       set({ driver, deviceConfig: cfg, config: structuredClone(cfg), past: [], future: [], selected: [] });
@@ -113,7 +123,7 @@ export const useApp = create<AppState>((set, get) => ({
       set({ error: String(e) });
       log('error', String(e));
     } finally {
-      set({ busy: false });
+      set({ busy: false, activity: null, progress: null });
     }
   },
 
@@ -176,11 +186,12 @@ export const useApp = create<AppState>((set, get) => ({
       if (skipped.length) set({ error: `Diese Änderungen kann die App noch nicht auf die Tastatur schreiben: ${skipped.join(', ')}` });
       return;
     }
-    set({ busy: true, error: null });
+    set({ busy: true, activity: 'Schreibe …', progress: null, savedAt: null, error: null });
     try {
       for (const section of sections) await driver.writeSection(section, config);
       // Mit Teil-Unterstützung den echten Gerätestand neu lesen, sonst gilt der Entwurf als geschrieben.
       const fresh = driver.writableSections ? await driver.readConfig() : structuredClone(config);
+      set({ savedAt: Date.now() });
       // Geschriebene Bereiche im Entwurf an den Gerätestand angleichen (z. B. gilt das Licht für alle Profile),
       // damit sie nicht weiter als geändert zählen. Ungeschriebene Änderungen bleiben erhalten.
       const draft = structuredClone(get().config ?? config);
@@ -192,7 +203,7 @@ export const useApp = create<AppState>((set, get) => ({
       set({ error: String(e) });
       log('error', String(e));
     } finally {
-      set({ busy: false });
+      set({ busy: false, activity: null, progress: null });
     }
   },
 
