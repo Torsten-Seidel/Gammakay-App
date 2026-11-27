@@ -122,8 +122,60 @@ Licht-Paket komplett: `07 | Effekt | Tempo | Helligkeit | Farbmodus | R | G | B 
 - GearHub merkt sich Tempo/Farbe je Effekt und schickt sie beim Effektwechsel mit.
 - Alle Prüfsummen (Byte 8) stimmen.
 
+## Seitenlicht (Mitschnitt 6, 2026-11-27, selbst über Claude in Chrome)
+
+```
+SET 08 01 00 04 08 fa ff fa f7   Immer an
+SET 08 04 01 04 08 fa ff fa f3   Welle
+SET 08 05 01 04 08 fa ff fa f2   Schlange
+SET 08 02 01 04 08 fa ff fa f5   Atmung
+SET 08 03 01 04 08 fa ff fa f4   Neon
+SET 08 03 03 04 08 fa ff fa f2   Tempo „Schnell“
+SET 08 03 00 04 08 fa ff fa f5   Tempo „Langsam“
+SET 08 03 00 02 08 fa ff fa f7   Helligkeit 2
+SET 08 00 00 00 07 fa ff fa fd   Ausschalten (= Ursprungszustand)
+```
+
+- `0x08` schreibt das Seitenlicht (bestätigt), Aufbau wie beim Tastenlicht:
+  `08 | Effekt | Tempo | Helligkeit | Farbmodus | R G B | Prüfsumme (Byte 8)`.
+- **Eigene Effektcodes** (bestätigt): `00` Aus, `01` Immer an, `02` Atmung, `03` Neon, `04` Welle, `05` Schlange.
+  Keine Richtungsoptionen.
+- **Tempo 0–3, nicht umgekehrt** (bestätigt): 3 = schnell, 0 = langsam.
+- Helligkeit 0–4. Farbmodus `07`/`08` wie beim Tastenlicht.
+- Neon ist ein Farbwechsel-Effekt: GearHub schickt ihn immer mit Farbmodus `08`, eine eigene Farbe wirkt nicht
+  (auf der Tastatur bestätigt).
+- „Aus“ schickt GearHub mit Tempo 0, Helligkeit 0 und Farbmodus `07`.
+- Noch nicht mitgeschnitten: eigene Farbe (laut GearHub-Code gleiche Stelle wie beim Tastenlicht, Byte 5..7).
+
+## Bluetooth (Mitschnitt 7, 2026-11-27)
+
+- Gerät über Bluetooth: VID `0x3151`, **PID `0x5027`**, Produktname leer.
+  Konfig-Interface: Usage Page `0xff55` / Usage `0x0202`, **Output- und Input-Report 6 mit 65 Byte**.
+- Normale Befehle: `55` + das bekannte 64-Byte-Paket, z. B. `55 91 00 00 00 00 00 00 6e`.
+  Die Antwort kommt als Input-Report 6 mit demselben Präfix (`55 91 … 78 00 78 00 …`) – ohne `55` ist sie
+  identisch mit der USB-Antwort.
+- **Akkustand** (bestätigt): `77 00 …` → Antwort `77 63 07 09 …`, Byte 1 = Prozent (`0x63` = 99 %, Display: voll).
+  Bedeutung von `07 09` offen. GearHub fragt alle 5 s.
+- Laut GearHub-Code: Input `88 …` ohne Präfix = Tastatur offline/Ruhezustand; Schreibbefehle über Bluetooth mit
+  100 ms Abstand.
+- Per Kabel liest GearHub keinen Akkustand (setzt fest 100 %).
+
+## 2,4-GHz-Empfänger (Mitschnitt 8, 2026-11-27)
+
+- Empfänger: VID `0x3151`, **PID `0x5038`**, Name „2.4G Wireless Keyboard“. Konfig-Interface wie per Kabel
+  (`0xffff`/`0x0002`, Feature-Report 0, 64 Byte).
+- **Status `F7`** (ohne Prüfsumme) → z. B. `00 64 00 00 01 01 01 00 00`:
+  Byte 0 = Antwort abholbereit, **Byte 1 = Akku Tastatur in %** (`0x64` = 100), Byte 2 = Akku Maus,
+  Byte 3 = Tastatur offline (0 = online), Byte 4 = Maus offline, Byte 5 = kann senden,
+  Byte 6 = Typ (1 Tastatur, 2 Maus, 3 beide), Byte 8 = RF-Boot.
+- **Befehl weiterleiten:** per `F7` warten bis Byte 5 = 1 → einmalig `F6 0A` (Ziel Tastatur; Maus `05`) →
+  normales Paket (z. B. `8f … 70`).
+- **Antwort abholen:** per `F7` warten bis Byte 0 = 1 → `FC` → `GET_FEATURE` liefert die Antwort im USB-Format
+  (`8f 07 0e …`).
+- Abstände laut GearHub 10 ms, Warten auf Status bis 5 × 100 ms. GearHub fragt `F7` alle 2 s.
+
 ## Offen / nächste Mitschnitte
 
-1. Seitenlicht (`08`/`88`) ändern.
-2. Polling-Rate, Energiespar-Zeiten.
-3. Polling-Rate ändern → bestätigt `83`/`03`?
+1. Polling-Rate ändern → bestätigt `83`/`03`?
+2. Energiespar-Zeiten (`91`/`11`).
+3. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).

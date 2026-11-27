@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { TK75_CAPABILITIES, type Capabilities, type KeyboardDriver } from './device/driver';
 import { log } from './device/log';
 import type { LayoutVariant } from './device/layout';
+import { DEFAULT_BATTERY_INDICATOR, sanitizeIndicator, type BatteryIndicatorConfig } from './device/battery';
 import {
   copySections, diffSections, type ConfigSection, type DeviceConfig, type KeyId, type LayerId, type Macro, type Profile,
 } from './device/model';
@@ -11,6 +12,23 @@ export type View =
 
 const HISTORY_LIMIT = 50;
 const LAYOUT_KEY = 'tk75.layout';
+const BATTERY_KEY = 'tk75.batteryIndicator';
+
+function loadBatteryIndicator(): BatteryIndicatorConfig {
+  try {
+    const saved = JSON.parse(localStorage.getItem(BATTERY_KEY) ?? 'null');
+    if (!saved) return DEFAULT_BATTERY_INDICATOR;
+    const d = DEFAULT_BATTERY_INDICATOR;
+    return sanitizeIndicator({
+      enabled: !!saved.enabled,
+      normal: { ...d.normal, ...saved.normal },
+      low: { ...d.low, ...saved.low },
+      critical: { ...d.critical, ...saved.critical },
+    });
+  } catch {
+    return DEFAULT_BATTERY_INDICATOR;
+  }
+}
 
 function loadLayout(): LayoutVariant {
   try {
@@ -36,8 +54,13 @@ interface AppState {
   error: string | null;
   /** Licht-Vorschau: zufällige Tastendrücke für reaktive Effekte simulieren */
   previewSimulate: boolean;
+  /** Akkustand in Prozent (nur Bluetooth), null = unbekannt */
+  battery: number | null;
+  /** Akkuanzeige im Seitenlicht (App-Einstellung, nicht auf der Tastatur gespeichert) */
+  batteryIndicator: BatteryIndicatorConfig;
 
   setPreviewSimulate(on: boolean): void;
+  setBatteryIndicator(cfg: BatteryIndicatorConfig): void;
   connect(driver: KeyboardDriver): Promise<void>;
   disconnect(): Promise<void>;
   setView(view: View): void;
@@ -67,8 +90,19 @@ export const useApp = create<AppState>((set, get) => ({
   busy: false,
   error: null,
   previewSimulate: true,
+  battery: null,
+  batteryIndicator: loadBatteryIndicator(),
 
   setPreviewSimulate: (on) => set({ previewSimulate: on }),
+  setBatteryIndicator(cfg) {
+    const clean = sanitizeIndicator(cfg);
+    try {
+      localStorage.setItem(BATTERY_KEY, JSON.stringify(clean));
+    } catch {
+      // nicht kritisch
+    }
+    set({ batteryIndicator: clean });
+  },
 
   async connect(driver) {
     set({ busy: true, error: null });
@@ -90,7 +124,7 @@ export const useApp = create<AppState>((set, get) => ({
     } catch (e) {
       log('error', String(e));
     }
-    set({ driver: null, deviceConfig: null, config: null, past: [], future: [], selected: [] });
+    set({ driver: null, deviceConfig: null, config: null, past: [], future: [], selected: [], battery: null });
   },
 
   setView: (view) => set({ view }),

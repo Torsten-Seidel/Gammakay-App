@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
-  speedToRaw,
+  decodeDongleStatus, sideLedPacket, speedToRaw,
 } from './protocol.ts';
 
 const bytes = (s: string) => s.trim().split(/\s+/).map((h) => parseInt(h, 16));
@@ -90,6 +90,34 @@ test('Tempo wird wie in GearHub umgekehrt übertragen', () => {
   assert.equal(speedToRaw(4), 0);
   assert.equal(speedToRaw(0), 4);
   assert.equal(rawToSpeed(1), 3);
+});
+
+test('Seitenlicht-Pakete entsprechen dem GearHub-Mitschnitt', () => {
+  const base = { speed: 1, brightness: 4, rainbow: true, color: '#fafffa' };
+  const cases: [Parameters<typeof sideLedPacket>[0], string][] = [
+    [{ ...base, mode: 0x01, speed: 0 }, '08 01 00 04 08 fa ff fa f7'],
+    [{ ...base, mode: 0x04 }, '08 04 01 04 08 fa ff fa f3'],
+    [{ ...base, mode: 0x05 }, '08 05 01 04 08 fa ff fa f2'],
+    [{ ...base, mode: 0x02 }, '08 02 01 04 08 fa ff fa f5'],
+    [{ ...base, mode: 0x03 }, '08 03 01 04 08 fa ff fa f4'],
+    [{ ...base, mode: 0x03, speed: 3 }, '08 03 03 04 08 fa ff fa f2'], // „schnell“ = 3, nicht umgekehrt
+    [{ ...base, mode: 0x03, speed: 0, brightness: 2 }, '08 03 00 02 08 fa ff fa f7'],
+    [{ ...base, mode: 0x00, speed: 3 }, '08 00 00 00 07 fa ff fa fd'], // Aus
+  ];
+  for (const [input, expected] of cases) {
+    assert.deepEqual(Array.from(sideLedPacket(input).slice(0, 9)), bytes(expected), expected);
+  }
+  assert.equal(sideLedPacket({ ...base, mode: 0x01, rainbow: false, color: '#ffffff' })[4], 0x07);
+  assert.equal(sideLedPacket({ ...base, mode: 0x03, rainbow: false })[4], 0x08); // Neon immer bunt
+  assert.throws(() => sideLedPacket({ ...base, mode: 0x06 }));
+  assert.throws(() => sideLedPacket({ ...base, mode: 0x01, speed: 4 }));
+});
+
+test('Empfänger-Status (F7) aus dem Mitschnitt', () => {
+  const idle = decodeDongleStatus(bytes('00 64 00 00 01 01 01 00 00'));
+  assert.deepEqual(idle, { keyboard: true, canRead: false, canSend: true, online: true, battery: 100 });
+  assert.equal(decodeDongleStatus(bytes('01 64 00 00 01 01 01 00 00')).canRead, true);
+  assert.equal(decodeDongleStatus(bytes('00 00 50 01 00 01 02 00 00')).keyboard, false); // nur Maus
 });
 
 test('Energiespar-Zeiten und Geräteinfo werden dekodiert', () => {

@@ -8,6 +8,26 @@ export const CONFIG_USAGE_PAGE = 0xffff;
 export const CONFIG_USAGE = 0x0002;
 export const PACKET_SIZE = 64;
 
+/** Bluetooth (Mitschnitt 7): eigene Produkt-ID, Vendor-Interface 0xff55/0x0202, Output-/Input-Report 6 (65 Byte). */
+export const TK75_BT_PRODUCT_ID = 0x5027;
+export const BT_USAGE_PAGE = 0xff55;
+export const BT_USAGE = 0x0202;
+export const BT_REPORT_ID = 6;
+/** Präfix vor jedem normalen Befehl über Bluetooth */
+export const BT_DATA_PREFIX = 0x55;
+/** Akku-Abfrage über Bluetooth: `77` → Antwort `77 <Prozent> …` */
+export const BT_BATTERY_CMD = 0x77;
+
+/** 2,4-GHz-Empfänger (Mitschnitt 8): eigene Produkt-ID, Konfig-Interface wie per Kabel (0xffff/0x0002, Feature 0). */
+export const TK75_DONGLE_PRODUCT_ID = 0x5038;
+/** Status: Antwort `kannLesen | Akku Tastatur | Akku Maus | offline Tastatur | offline Maus | kannSenden | Typ | ? | RF-Boot` */
+export const DONGLE_STATUS = 0xf7;
+/** Zielgerät wählen: `F6 0A` = Tastatur */
+export const DONGLE_SELECT = 0xf6;
+export const DONGLE_KEYBOARD = 0x0a;
+/** Antwort der Tastatur zum Abholen anfordern */
+export const DONGLE_NOTICE_READ = 0xfc;
+
 export const CMD = {
   GET_VERSION: 0x8f,
   GET_INFO: 0xad,
@@ -15,6 +35,7 @@ export const CMD = {
   GET_SIDE_LED: 0x88,
   GET_SLEEP: 0x91,
   SET_LED: 0x07,
+  SET_SIDE_LED: 0x08,
 } as const;
 
 /** 0xFF minus Summe der Bytes 0..end-1 (nur unteres Byte). */
@@ -158,6 +179,70 @@ export function ledBrightnessPacket(raw: number[], brightness: number): Uint8Arr
   const body = [...raw];
   body[2] = brightness;
   return makePacket([CMD.SET_LED, ...body], 8);
+}
+
+// ---------- Seitenlicht ----------
+
+/**
+ * Effektcodes fürs Seitenlicht (Mitschnitt 6, docs/protocol.md) – eigene Codes, nicht die des Tastenlichts.
+ * Keine Richtungsoptionen.
+ */
+export const SIDE_LED_EFFECTS: { id: string; label: string; code: number; rainbowOnly?: boolean }[] = [
+  { id: 'wave', label: 'Welle', code: 0x04 },
+  { id: 'snake', label: 'Schlange', code: 0x05 },
+  { id: 'off', label: 'Aus', code: 0x00 },
+  { id: 'static', label: 'Immer an', code: 0x01 },
+  { id: 'breathing', label: 'Atmung', code: 0x02 },
+  // Farbwechsel-Effekt: ignoriert die Farbe, GearHub schickt immer „bunt“.
+  { id: 'neon', label: 'Neon', code: 0x03, rainbowOnly: true },
+];
+
+/** Seitenlicht-Tempo: 0 = langsam … 3 = schnell, wird NICHT umgekehrt übertragen. */
+export const SIDE_SPEED_MAX = 3;
+
+export interface SideLedWrite {
+  mode: number;
+  /** 0 = langsam … 3 = schnell (direkt der Rohwert) */
+  speed: number;
+  brightness: number;
+  rainbow: boolean;
+  color: string;
+}
+
+/** Schreibpaket fürs Seitenlicht: `08 | Effekt | Tempo | Helligkeit | Farbmodus | R G B | Prüfsumme`. */
+export function sideLedPacket(w: SideLedWrite): Uint8Array {
+  if (!SIDE_LED_EFFECTS.some((e) => e.code === w.mode)) throw new Error(`Seitenlicht-Effekt 0x${hex2(w.mode)} ist nicht freigegeben`);
+  checkRange('Tempo', w.speed, SIDE_SPEED_MAX);
+  checkRange('Helligkeit', w.brightness, BRIGHTNESS_MAX);
+  const [r, g, b] = parseColor(w.color.toLowerCase() === '#ffffff' ? '#fafffa' : w.color);
+  // Wie GearHub: „Aus“ mit Tempo/Helligkeit 0 und Farbmodus „eine Farbe“.
+  if (w.mode === 0x00) return makePacket([CMD.SET_SIDE_LED, 0, 0, 0, COLOR_MODE_SINGLE, r, g, b], 8);
+  const rainbowOnly = SIDE_LED_EFFECTS.find((e) => e.code === w.mode)?.rainbowOnly;
+  const colorByte = w.rainbow || rainbowOnly ? COLOR_MODE_RAINBOW : COLOR_MODE_SINGLE;
+  return makePacket([CMD.SET_SIDE_LED, w.mode, w.speed, w.brightness, colorByte, r, g, b], 8);
+}
+
+// ---------- 2,4-GHz-Empfänger ----------
+
+/** Status des 2,4-GHz-Empfängers aus der `F7`-Antwort (nur der Tastatur-Teil). */
+export interface DongleStatus {
+  keyboard: boolean;
+  canRead: boolean;
+  canSend: boolean;
+  online: boolean;
+  battery: number;
+}
+
+export function decodeDongleStatus(res: ArrayLike<number>): DongleStatus {
+  const type = res[6];
+  const keyboard = type === 1 || type === 3;
+  return {
+    keyboard,
+    canRead: keyboard && res[0] === 1,
+    canSend: keyboard && res[5] === 1,
+    online: keyboard && res[3] === 0,
+    battery: Math.min(100, res[1] ?? 0),
+  };
 }
 
 // ---------- Energiesparen ----------

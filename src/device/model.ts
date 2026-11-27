@@ -58,6 +58,7 @@ export interface LightingConfig {
   speed: number; // 0–4, 4 = schnell
   /** Richtung/Muster-Index (nur bei Effekten mit Optionen; fehlt = 0) */
   option?: number;
+  /** Seitenlicht: Effekt aus `capabilities.sideLightEffects`, Tempo 0–3 (3 = schnell) */
   side: { effect: LightEffect; rainbow: boolean; color: string; brightness: number; speed: number };
 }
 

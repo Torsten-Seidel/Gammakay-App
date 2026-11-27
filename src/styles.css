@@ -246,3 +246,30 @@ input[type='color'] { width: 44px; height: 32px; border: 1px solid var(--border)
 .dpad-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .dpad-center { border-radius: 50%; margin: 9px; background: #2f3440; }
 .chip-icon { font-size: 14px; }
+
+/* Beleuchtung: Tabs Tastenlicht / Seitenlicht */
+.tabs.horizontal { display: flex; gap: 6px; margin-bottom: 12px; }
+.tabs.horizontal .tab { text-align: center; min-width: 130px; }
+.grid-light { grid-template-columns: 2fr 1fr; }
+.grid-side { display: grid; grid-template-columns: 1fr 1fr 1.3fr; gap: 12px; }
+@media (max-width: 1350px) { .grid-side { grid-template-columns: 1fr 1fr; } .grid-side > :last-child { grid-column: 1 / -1; } }
+
+/* Akkuanzeige */
+.battery-zones { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.battery-zone { background: var(--surface-2); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+.zone-head { display: flex; align-items: center; gap: 8px; }
+.zone-head .hint { margin-left: auto; }
+.zone-dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; }
+.zone-dot.pulse { animation: zone-pulse 1.6s ease-in-out infinite; }
+@keyframes zone-pulse { 50% { opacity: 0.25; } }
+.battery-zone .check, .battery-zone .percent { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.battery-zone .check input { accent-color: var(--accent); }
+.battery-zone .percent input { width: 58px; background: var(--surface-3); color: var(--text); border: 1px solid var(--surface-3); border-radius: 6px; padding: 4px 6px; }
+.battery-zone input[type='color'] { margin-left: auto; }
+
+/* Akkustand in der Kopfleiste */
+.battery-badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-dim); margin-right: 6px; }
+.battery-badge.low { color: #ff8000; }
+.battery-icon { width: 22px; height: 11px; border: 1.5px solid currentColor; border-radius: 3px; padding: 1px; position: relative; display: inline-block; }
+.battery-icon::after { content: ''; position: absolute; right: -4px; top: 2px; width: 2px; height: 5px; background: currentColor; border-radius: 1px; }
+.battery-icon > span { display: block; height: 100%; background: currentColor; border-radius: 1px; }

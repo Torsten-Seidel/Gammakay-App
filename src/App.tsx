@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { HidChooser } from './components/HidChooser';
 import { KeyboardView } from './components/KeyboardView';
+import { useBatteryWatcher } from './components/useBatteryWatcher';
 import { IconRail, Sidebar, TopBar, Welcome } from './components/Shell';
 import { LAYOUTS } from './device/layout';
 import type { KeyId } from './device/model';
@@ -119,6 +120,7 @@ export function App() {
   const isDiag = view === 'diagnose';
   const pressed = useKeyTester(isDiag);
   useShortcuts();
+  useBatteryWatcher();
 
   const Panel = !isDiag ? PANELS[view] : null;
 

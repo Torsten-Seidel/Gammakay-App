@@ -1,9 +1,9 @@
-import type { ConfigSection, DeviceConfig } from './model';
-import { LED_EFFECTS } from './gamakay/protocol';
+import type { ConfigSection, DeviceConfig, LightingConfig } from './model';
+import { LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX } from './gamakay/protocol';
 
 export interface DeviceInfo {
   name: string;
-  transport: 'mock' | 'usb';
+  transport: 'mock' | 'usb' | 'bt' | 'dongle';
   vendorId?: number;
   productId?: number;
   firmware?: string;
@@ -20,6 +20,10 @@ export interface Capabilities {
   lightEffects: { id: string; label: string; options?: string[] }[];
   /** Tempo- und Helligkeitsstufen (0 … max) */
   lightLevels: number;
+  /** Seitenlicht-Effekte (eigene Liste, keine Optionen) */
+  sideLightEffects: { id: string; label: string; rainbowOnly?: boolean }[];
+  /** Höchste Tempostufe des Seitenlichts */
+  sideSpeedMax: number;
 }
 
 export interface KeyboardDriver {
@@ -32,6 +36,10 @@ export interface KeyboardDriver {
   readConfig(): Promise<DeviceConfig>;
   writeSection(section: ConfigSection, config: DeviceConfig): Promise<void>;
   disconnect(): Promise<void>;
+  /** Akkustand in Prozent; null = nicht verfügbar. Fehlt die Methode, gibt es keine Akku-Abfrage. */
+  readBattery?(): Promise<number | null>;
+  /** Seitenlicht überlagern (Akkuanzeige); null stellt die eigene Einstellung `own` wieder her. */
+  setSideOverride?(override: LightingConfig['side'] | null, own: LightingConfig['side']): Promise<void>;
 }
 
 export const TK75_CAPABILITIES: Capabilities = {
@@ -42,4 +50,6 @@ export const TK75_CAPABILITIES: Capabilities = {
   display: { width: 128, height: 128 },
   lightEffects: LED_EFFECTS.map(({ id, label, options }) => ({ id, label, options })),
   lightLevels: 4,
+  sideLightEffects: SIDE_LED_EFFECTS.map(({ id, label, rainbowOnly }) => ({ id, label, rainbowOnly })),
+  sideSpeedMax: SIDE_SPEED_MAX,
 };

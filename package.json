@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "start": "vite build && electron . --dist",
-    "test": "node --test src/device/gamakay/protocol.test.ts"
+    "test": "node --test src/device/gamakay/protocol.test.ts src/device/battery.test.ts"
   },
   "type": "module",
   "dependencies": {

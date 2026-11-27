@@ -62,7 +62,7 @@ export function Sidebar() {
       <div className="device-card">
         <div className="device-thumb" />
         <div className="device-meta">
-          <small>{driver.info.transport === 'mock' ? 'Demo-Gerät' : 'USB'}</small>
+          <small>{driver.info.transport === 'mock' ? 'Demo-Gerät' : driver.info.transport === 'bt' ? 'Bluetooth' : driver.info.transport === 'dongle' ? 'Empfänger 2,4 GHz' : 'USB'}</small>
           <strong>{driver.info.name}</strong>
         </div>
         <button className="link" onClick={disconnect}>Trennen</button>
@@ -87,6 +87,7 @@ export function TopBar() {
   const config = useApp((s) => s.config);
   const driver = useApp((s) => s.driver);
   const busy = useApp((s) => s.busy);
+  const battery = useApp((s) => s.battery);
   const past = useApp((s) => s.past.length);
   const future = useApp((s) => s.future.length);
   const { undo, redo, apply, revert, edit } = useApp.getState();
@@ -105,6 +106,12 @@ export function TopBar() {
         ))}
       </select>
       <div className="spacer" />
+      {battery !== null && (
+        <span className={`battery-badge ${battery <= 20 ? 'low' : ''}`} title="Akkustand">
+          <span className="battery-icon"><span style={{ width: `${battery}%` }} /></span>
+          {battery} %
+        </span>
+      )}
       <button className="icon-btn" disabled={!past} onClick={undo} title="Rückgängig (Strg+Z)"><Icon name="undo" /></button>
       <button className="icon-btn" disabled={!future} onClick={redo} title="Wiederholen (Strg+Y)"><Icon name="redo" /></button>
       {dirty.length > 0 && <button className="btn ghost" onClick={revert}>Verwerfen</button>}
@@ -138,17 +145,17 @@ export function Welcome() {
     <div className="welcome">
       <h1>TK75 Konfigurator</h1>
       <p>
-        Eigene Konfigurations-App für die Gamakay TK75 TMR. Verbinde die Tastatur per USB-Kabel oder probiere die
-        Oberfläche im Demo-Modus aus.
+        Eigene Konfigurations-App für die Gamakay TK75 TMR. Verbinde die Tastatur per USB-Kabel, Bluetooth oder 2,4-GHz-Empfänger
+        oder probiere die Oberfläche im Demo-Modus aus.
       </p>
       <div className="row">
         <button className="btn" disabled={busy} onClick={() => connect(new MockDriver())}>Demo-Modus</button>
-        <button className="btn primary" disabled={busy} onClick={connectUsb}>Tastatur verbinden (USB)</button>
+        <button className="btn primary" disabled={busy} onClick={connectUsb}>Tastatur verbinden</button>
       </div>
       {error && <p className="error-text">{error}</p>}
       <p className="hint">
-        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst das
-        Tastenlicht. Bitte GearHub vorher schließen.
+        Mit der echten Tastatur werden bisher Licht und Energiespar-Zeiten gelesen; schreiben kann die App vorerst
+        Tasten- und Seitenlicht. Kabellos zeigt sie zusätzlich den Akkustand. Bitte GearHub vorher schließen.
       </p>
     </div>
   );
