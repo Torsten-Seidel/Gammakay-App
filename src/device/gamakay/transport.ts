@@ -8,7 +8,8 @@ const DONGLE_GAP_MS = 10; // GearHub: INTERVAL_24G_TIME
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RESPONSE_DELAY_MS = 12;
-const MAX_POLLS = 5;
+const MAX_POLLS = 10;
+const AFTER_WRITE_MS = 2000;
 const BT_TIMEOUT_MS = 1000;
 
 function toBytes(view: DataView): Uint8Array {
@@ -52,6 +53,8 @@ abstract class QueuedTransport {
 
 /** Kabel: Feature-Report 0, 64 Byte. Jeder Befehl landet im Protokoll-Log. */
 export class GamakayTransport extends QueuedTransport implements Transport {
+  private lastWriteAt = 0;
+
   private async send(packet: Uint8Array): Promise<void> {
     log('out', `SET_FEATURE ${toHex(packet, 16)}`);
     await this.device.sendFeatureReport(0, packet as Uint8Array<ArrayBuffer>);
@@ -59,13 +62,23 @@ export class GamakayTransport extends QueuedTransport implements Transport {
 
   query(cmd: number): Promise<Uint8Array> {
     return this.enqueue(async () => {
-      await this.send(readPacket(cmd));
+      const packet = readPacket(cmd);
+      await this.send(packet);
+      // Kurz nach einem Schreibbefehl (z. B. Magnetschalter) ist die Tastatur noch beschäftigt und liefert nur
+      // unsere Anfrage zurück. Dann weiter warten. Aber: Manche echten Antworten sehen genauso aus
+      // (z. B. 83 bei 8000 Hz = lauter Nullen) – darum nur direkt nach dem Schreiben, und zur Not doch annehmen.
+      const afterWrite = Date.now() - this.lastWriteAt < AFTER_WRITE_MS;
+      let last: Uint8Array | null = null;
       for (let attempt = 0; attempt < MAX_POLLS; attempt++) {
         await sleep(RESPONSE_DELAY_MS);
         const res = toBytes(await this.device.receiveFeatureReport(0));
         log('in', `GET_FEATURE ${toHex(res, 24)}`);
-        if (res[0] === cmd) return res;
+        if (res[0] !== cmd) continue;
+        if (!afterWrite || !packet.every((b, i) => res[i] === b)) return res;
+        last = res;
+        await sleep(50);
       }
+      if (last) return last;
       throw new Error(`Keine passende Antwort auf Befehl 0x${cmd.toString(16)}`);
     });
   }
@@ -74,6 +87,7 @@ export class GamakayTransport extends QueuedTransport implements Transport {
   write(packet: Uint8Array): Promise<void> {
     return this.enqueue(async () => {
       await this.send(packet);
+      this.lastWriteAt = Date.now();
       await sleep(40);
     });
   }

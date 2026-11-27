@@ -2,13 +2,13 @@ import type { KeyboardDriver } from './driver';
 import { TK75_CAPABILITIES } from './driver';
 import { log, toHex } from './log';
 import {
-  createDefaultConfig, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Profile, type SwitchConfig,
+  createDefaultConfig, switchFor, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Profile, type SwitchConfig,
 } from './model';
 import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  MAGNETISM, PACKET_SIZE, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -33,6 +33,9 @@ const isDongleConfig = (d: HIDDevice) =>
   d.productId === TK75_DONGLE_PRODUCT_ID &&
   d.collections.some((c) => c.usagePage === CONFIG_USAGE_PAGE && c.usage === CONFIG_USAGE);
 const isConfigInterface = (d: HIDDevice) => isUsbConfig(d) || isBtConfig(d) || isDongleConfig(d);
+const MAX_SWITCH_KEYS = 5;
+const KEY_WRITE_GAP_MS = 150;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 GHz' } as const;
 
 /**
@@ -45,7 +48,7 @@ const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 G
 export class GamakayHidDriver implements KeyboardDriver {
   readonly capabilities = TK75_CAPABILITIES;
   readonly supports = { read: true, write: true };
-  readonly writableSections: ConfigSection[] = ['lighting', 'settings'];
+  readonly writableSections: ConfigSection[] = ['lighting', 'settings', 'switches'];
   readonly info: { name: string; transport: 'usb' | 'bt' | 'dongle'; vendorId: number; productId: number; firmware?: string };
   private readonly transport: Transport;
   /** Eigene Seitenlicht-Einstellung, solange die Akkuanzeige das Seitenlicht überlagert */
@@ -54,6 +57,9 @@ export class GamakayHidDriver implements KeyboardDriver {
   private side: LedState | null = null;
   /** Zuletzt gelesene/geschriebene Geräteeinstellungen (zum Erkennen, was sich ändert) */
   private settings: DeviceSettings | null = null;
+  /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
+  private keySlots: Record<string, number> = {};
+  private switchState: Record<string, KeySwitchValues & { continuousRT: boolean }> = {};
 
   private constructor(device: HIDDevice) {
     const transport = isBtConfig(device) ? 'bt' : isDongleConfig(device) ? 'dongle' : 'usb';
@@ -194,8 +200,11 @@ export class GamakayHidDriver implements KeyboardDriver {
 
     const mm = (raw: number) => Math.round((raw / TRAVEL_STEP) * 100) / 100;
     const perKey: Record<string, SwitchConfig> = {};
+    this.keySlots = {};
+    this.switchState = {};
     slots.forEach((key, i) => {
       if (!key || perKey[key]) return;
+      this.keySlots[key] = i;
       perKey[key] = {
         actuation: mm(travel[i]),
         rapidTrigger: decodeKeyMode(modes[i]).rapidTrigger,
@@ -205,6 +214,7 @@ export class GamakayHidDriver implements KeyboardDriver {
         deadzoneTop: mm(dzTop[i]),
         deadzoneBottom: mm(dzBottom[i]),
       };
+      this.switchState[key] = { ...perKey[key], modeByte: modes[i] };
     });
 
     // Häufigste Einstellung = Standard, nur Abweichungen pro Taste ablegen (wie das Modell es erwartet).
@@ -227,8 +237,47 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (unknown.length) log('info', `Belegte Plätze ohne bekannte Taste: ${unknown.join(' | ')}`);
   }
 
+  /**
+   * Schalterwerte schreiben: nur Tasten, die vom gelesenen Stand abweichen, einzeln (wie GearHub).
+   * Testphase: höchstens MAX_SWITCH_KEYS Tasten pro Übernehmen; Continuous RT ist noch nicht schreibbar.
+   */
+  private async writeSwitches(profile: Profile): Promise<void> {
+    if (!Object.keys(this.switchState).length) throw new Error('Schalterwerte wurden noch nicht gelesen.');
+    const changes = Object.entries(this.switchState).flatMap(([key, from]) => {
+      const to = switchFor(profile, key);
+      if (to.continuousRT !== from.continuousRT) throw new Error('Continuous RT kann noch nicht geschrieben werden.');
+      const packets = keySwitchPackets(this.keySlots[key], from, { ...to, modeByte: from.modeByte });
+      return packets.length ? [{ key, to, packets }] : [];
+    });
+    if (!changes.length) return;
+    if (changes.length > MAX_SWITCH_KEYS) {
+      throw new Error(`Testphase: höchstens ${MAX_SWITCH_KEYS} Tasten auf einmal (geändert: ${changes.length}).`);
+    }
+    for (const { key, to, packets } of changes) {
+      log('info', `Schreibe ${key} (Platz ${this.keySlots[key]}): Auslösen ${to.actuation} mm, ` +
+        `RT ${to.rapidTrigger ? `an ${to.rtPress}/${to.rtRelease}` : 'aus'}, Totzone ${to.deadzoneTop}/${to.deadzoneBottom} mm`);
+      for (const p of packets) await this.transport.write(p);
+      // Nach dem Ende-Kennzeichen speichert die Tastatur; Pakete in dieser Zeit gehen verloren
+      // (getestet: bei 40 ms Abstand kamen von F9–F12 nur F9 und F12 an). GearHub wartet 100 ms je Taste.
+      await sleep(KEY_WRITE_GAP_MS);
+      const from = this.switchState[key];
+      this.switchState[key] = {
+        ...to,
+        modeByte: to.rapidTrigger === from.rapidTrigger ? from.modeByte : (from.modeByte & 0x7f) | (to.rapidTrigger ? 0x80 : 0),
+      };
+    }
+    // GearHub wartet danach (vendorSleep, bei Sammelschreiben 500 ms); vorher liefert die Tastatur nur Echos.
+    await sleep(500);
+    // Nachlesen: Die Tastatur bestätigt Schreibbefehle nicht, verlorene Pakete fielen sonst nicht auf.
+    const check = structuredClone(profile);
+    await this.readSwitches(check);
+    const lost = changes.filter(({ key, to }) => JSON.stringify(switchFor(check, key)) !== JSON.stringify(to)).map((c) => c.key);
+    if (lost.length) throw new Error(`Nicht von der Tastatur übernommen: ${lost.join(', ')} – bitte erneut „Übernehmen“.`);
+  }
+
   async writeSection(section: ConfigSection, config: DeviceConfig): Promise<void> {
     if (section === 'settings') return this.writeSettings(config.settings);
+    if (section === 'switches') return this.writeSwitches(config.profiles[config.activeProfile]);
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
     if (!this.led || !this.side) throw new Error('Licht wurde noch nicht gelesen.');
     const wanted = config.profiles[config.activeProfile].lighting;

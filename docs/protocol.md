@@ -219,6 +219,18 @@ Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten
 - **Faktor 100 = 1 mm** (Firmware 0x0403), bestätigt: Rohwert `c8` = 200 → GearHub zeigt 2,00 mm.
 - Werkszustand: Auslösepunkt 2,00 mm, RT aus, RT 0,30/0,30 mm, Totzone unten 0,30 mm, oben 0.
 
+## Magnetschalter schreiben, einzelne Taste (2026-11-27, per Kabel geprüft)
+
+`65 <Art> 00 <Platz> <Ende> 00 00 <Prüfsumme>` + Wert (u16 LE, bei Art 7 und fb 1 Byte). Wie GearHub
+(`_sendMagnetismInfoSimpleCMD`): erst Modus (Art 7), dann die geänderten Wege; nur das letzte Paket einer Taste hat Ende = 1.
+
+- Bestätigt an F12 (Platz 72 = `48`): Auslösepunkt (Art 0), Modusbyte RT an/aus (`80`/`00`), RT Drücken/Loslassen (Art 2/3).
+- **Nach jeder Taste ≥ 100 ms warten** (GearHub `defaultVendorSleepTime` = 100). Bei 40 ms kamen von F9–F12 nur F9 und F12 an.
+  Die App wartet 150 ms und liest danach zur Kontrolle nach (die Tastatur bestätigt nichts).
+- Direkt nach dem Schreiben antwortet sie einige 100 ms lang nur mit dem Echo der Anfrage → 500 ms warten.
+  Achtung: `83` bei 8000 Hz sieht genauso aus wie ein Echo (lauter Nullen).
+- Sammelschreiben (`65 <Art> 01 <Seite> <Ende>` + 56 Byte je Seite) ist noch nicht genutzt; die App erlaubt bis 5 Tasten pro Übernehmen.
+
 ## Offen / nächste Mitschnitte
 
 1. Auslösepunkt/RT schreiben (`65`), Rückstellpunkt (Art 1), Continuous RT.

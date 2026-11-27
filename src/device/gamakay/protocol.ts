@@ -38,6 +38,7 @@ export const CMD = {
   SET_SLEEP: 0x11,
   GET_KEYMATRIX: 0x8a,
   GET_MULTI_MAGNETISM: 0xe5,
+  SET_MULTI_MAGNETISM: 0x65,
   SET_REPORT_RATE: 0x03,
   SET_LED: 0x07,
   SET_SIDE_LED: 0x08,
@@ -337,6 +338,58 @@ export function decodeKeyMatrix(bytes: ArrayLike<number>): (string | undefined)[
     else slots.push(undefined);
   }
   return slots;
+}
+
+/** Schalterwerte einer Taste in mm (strukturgleich mit SwitchConfig im Modell) + rohes Modusbyte. */
+export interface KeySwitchValues {
+  actuation: number;
+  rapidTrigger: boolean;
+  rtPress: number;
+  rtRelease: number;
+  deadzoneTop: number;
+  deadzoneBottom: number;
+  /** Rohes Modusbyte vom Gerät (Bit 7 = RT); andere Modi (DKS, MT …) bleiben unangetastet */
+  modeByte: number;
+}
+
+export const SWITCH_LIMITS = {
+  actuation: [0.1, 3.4],
+  rtPress: [0.01, 2],
+  rtRelease: [0.01, 2],
+  deadzoneTop: [0, 1],
+  deadzoneBottom: [0, 1],
+} as const;
+
+/** `65 <Art> 00 <Platz> <letzter?> 00 00 <Prüfsumme>` + Wert (GearHub _sendMagnetismInfoSimpleCMD). */
+export function magnetismKeyPacket(kind: number, slot: number, last: boolean, data: number[]): Uint8Array {
+  if (slot < 0 || slot >= MATRIX_SLOTS) throw new Error(`Ungültiger Platz ${slot}`);
+  return makePacket([CMD.SET_MULTI_MAGNETISM, kind, 0, slot, last ? 1 : 0], 7, data);
+}
+
+/**
+ * Pakete für eine Taste: nur geänderte Werte, Reihenfolge wie GearHub (erst Modus, dann Wege).
+ * Das letzte Paket trägt das Ende-Kennzeichen. Prüft alle Grenzen, bevor etwas gebaut wird.
+ */
+export function keySwitchPackets(slot: number, from: KeySwitchValues, to: KeySwitchValues): Uint8Array[] {
+  const raw = (mm: number) => Math.round(mm * TRAVEL_STEP);
+  for (const [field, [min, max]] of Object.entries(SWITCH_LIMITS)) {
+    const v = to[field as keyof typeof SWITCH_LIMITS];
+    if (!(v >= min && v <= max)) throw new Error(`${field} = ${v} mm liegt außerhalb ${min}–${max} mm`);
+  }
+  const ops: { kind: number; data: number[] }[] = [];
+  const u16 = (v: number) => [v & 0xff, v >> 8];
+  if (to.rapidTrigger !== from.rapidTrigger) {
+    ops.push({ kind: MAGNETISM.modes, data: [(from.modeByte & 0x7f) | (to.rapidTrigger ? 0x80 : 0)] });
+  }
+  const travels: [keyof typeof SWITCH_LIMITS, number][] = [
+    ['actuation', MAGNETISM.travel], ['deadzoneBottom', MAGNETISM.deadzoneBottom],
+    ['rtPress', MAGNETISM.rtPress], ['rtRelease', MAGNETISM.rtRelease],
+  ];
+  for (const [field, kind] of travels) {
+    if (raw(to[field]) !== raw(from[field])) ops.push({ kind, data: u16(raw(to[field])) });
+  }
+  if (raw(to.deadzoneTop) !== raw(from.deadzoneTop)) ops.push({ kind: MAGNETISM.deadzoneTop, data: [raw(to.deadzoneTop)] });
+  return ops.map((op, i) => magnetismKeyPacket(op.kind, slot, i === ops.length - 1, op.data));
 }
 
 // ---------- Energiesparen ----------

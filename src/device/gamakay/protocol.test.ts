@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
   decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
@@ -166,4 +167,25 @@ test('Magnetwerte u16 LE und Modusbyte', () => {
   assert.deepEqual(decodeU16List([120, 0, 0x2c, 0x01]), [120, 300]);
   assert.deepEqual(decodeKeyMode(0x80), { mode: 0, rapidTrigger: true });
   assert.deepEqual(decodeKeyMode(0x02), { mode: 2, rapidTrigger: false });
+});
+
+const BASE = { actuation: 2, rapidTrigger: false, rtPress: 0.3, rtRelease: 0.3, deadzoneTop: 0, deadzoneBottom: 0.3, modeByte: 0 };
+
+test('Schalter schreiben: nur Auslösepunkt geändert → ein Paket 65 00 00 <Platz> 01 + u16', () => {
+  const [p, ...rest] = keySwitchPackets(69, BASE, { ...BASE, actuation: 1.5 });
+  assert.equal(rest.length, 0);
+  assert.deepEqual([...p.subarray(0, 5)], [0x65, 0, 0, 69, 1]);
+  assert.equal(p[7], (0xff - ((0x65 + 69 + 1) & 0xff)) & 0xff);
+  assert.deepEqual([...p.subarray(8, 10)], [150, 0]);
+});
+
+test('Schalter schreiben: RT an → zuerst Modusbyte, Ende-Kennzeichen nur am letzten Paket', () => {
+  const ps = keySwitchPackets(3, BASE, { ...BASE, rapidTrigger: true, rtPress: 0.1 });
+  assert.deepEqual(ps.map((p) => [p[1], p[4], p[8]]), [[7, 0, 0x80], [2, 1, 10]]);
+});
+
+test('Schalter schreiben: keine Änderung → keine Pakete; Grenzen werden geprüft', () => {
+  assert.equal(keySwitchPackets(0, BASE, { ...BASE }).length, 0);
+  assert.throws(() => keySwitchPackets(0, BASE, { ...BASE, actuation: 3.9 }));
+  assert.throws(() => keySwitchPackets(128, BASE, { ...BASE, actuation: 1 }));
 });
