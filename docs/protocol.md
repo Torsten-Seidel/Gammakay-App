@@ -217,6 +217,7 @@ Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten
   Art 0 Auslösepunkt, 1 Rückstellpunkt (noch nicht gelesen), 2/3 RT Drücken/Loslassen, 6 Totzone unten,
   7 Tastenmodus (Bit 7 = RT), fb Totzone oben.
 - **Faktor 100 = 1 mm** (Firmware 0x0403), bestätigt: Rohwert `c8` = 200 → GearHub zeigt 2,00 mm.
+- Über alle drei Wege geprüft, identische Werte: Kabel ~0,5 s, Bluetooth ~0,7 s (Antwort mit Präfix `55`), Empfänger ~2,9 s.
 - Werkszustand: Auslösepunkt 2,00 mm, RT aus, RT 0,30/0,30 mm, Totzone unten 0,30 mm, oben 0.
 
 ## Magnetschalter schreiben, einzelne Taste (2026-11-27, per Kabel geprüft)
