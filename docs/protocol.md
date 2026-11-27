@@ -287,6 +287,12 @@ danach vendorSleep 100 ms; die App wartet 150 ms und liest die Matrix zur Kontro
   Fn+# (`0d 01 00`, „Effekt wechseln“) wechselte dabei den Seitenlicht-Effekt (Schlange 05 → Atmen 02). Fn+5 Kabel, Fn+Z/X/C (ISO: Y/X/C) Profil 1–3 `08 00 04 00–02`, Medien auf F1–F12, Licht auf den Pfeiltasten. Leere Plätze `00 00 00 00` = unbelegt.
 - Geprüft: Fn+A → Stumm → F11 → Werk (unbelegt) inkl. Kontroll-Lesen: Kabel ~2,3 s, Bluetooth ~2,2 s, Empfänger ~6 s.
 
+## Drehknopf belegen (2026-11-28, alle drei Wege geprüft)
+
+- Plätze 90 links drehen (Werk Leiser `03 00 ea`), 91 rechts drehen (Lauter `03 00 e9`), 92 drücken (Play/Pause `03 00 cd`);
+  geschrieben wie jede Taste (`0a` bzw. `10` für Fn). In der App `KnobLeft`/`KnobRight`/`KnobPress`, ohne Magnetschalter.
+- Geprüft: Drücken → Stumm → F11 → Werk inkl. Kontroll-Lesen: Kabel ~2,3 s, Bluetooth ~2,5 s, Empfänger ~6,1 s.
+
 ## Offen / nächste Mitschnitte
 
-1. Makros (`09`), Drehknopf-Belegung, Werks-Fn-Belegungen in der Oberfläche beschriften.
+1. Makros (`09`); Drehknopf-Plätze 96–98 (`13 01 00/01/03`) und Fn+Knopf (`13 03`, Display) entschlüsseln.

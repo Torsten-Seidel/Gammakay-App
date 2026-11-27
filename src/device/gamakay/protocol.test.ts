@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  encodeKeyAction, decodeKeyAction, fnMatrixReadPacket, fnMatrixWritePacket, TK75_DEFAULT_FN_MATRIX, keyMatrixWritePacket, TK75_SLOTS, TK75_DEFAULT_MATRIX,
+  TK75_KEYMAP_SLOTS, encodeKeyAction, decodeKeyAction, fnMatrixReadPacket, fnMatrixWritePacket, TK75_DEFAULT_FN_MATRIX, keyMatrixWritePacket, TK75_SLOTS, TK75_DEFAULT_MATRIX,
   bulkSwitchPackets,
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
@@ -265,4 +265,13 @@ test('Licht lesen: Farbmodus 0–6 = feste Farbliste, 7 = eigene Farbe, 8 = bunt
   assert.equal(decodeLed(bytes('88 05 00 04 00 8b 00 ff')).color, '#ff0000');
   assert.equal(decodeLed(bytes('88 05 00 04 07 8b 00 ff')).color, '#8b00ff');
   assert.equal(decodeLed(bytes('88 05 00 04 08 8b 00 ff')).colorMode, 8);
+});
+
+test('Drehknopf: Plätze 90–92, Werk = Leiser/Lauter/Play', () => {
+  assert.equal(TK75_KEYMAP_SLOTS[90], 'KnobLeft');
+  assert.equal(TK75_KEYMAP_SLOTS[92], 'KnobPress');
+  assert.equal(TK75_KEYMAP_SLOTS[96], undefined);
+  assert.equal(TK75_KEYMAP_SLOTS.filter(Boolean).length, 85);
+  assert.deepEqual(decodeKeyAction([3, 0, 234, 0], 90), { kind: 'default' });
+  assert.deepEqual(encodeKeyAction({ kind: 'function', fn: 'light.brightDown' }, 90), [13, 2, 2, 0]);
 });

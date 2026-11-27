@@ -8,7 +8,7 @@ import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, fnMatrixReadPacket, fnMatrixWritePacket, type MatrixLayer, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, TK75_KEYMAP_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, fnMatrixReadPacket, fnMatrixWritePacket, type MatrixLayer, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -286,7 +286,7 @@ export class GamakayHidDriver implements KeyboardDriver {
       this.keymapRead[layer] = {};
       const actions: Record<string, KeyAction> = {};
       const unknown: string[] = [];
-      TK75_SLOTS.forEach((key, slot) => {
+      TK75_KEYMAP_SLOTS.forEach((key, slot) => {
         if (!key) return;
         const action = decodeKeyAction(this.keymapRaw[layer][slot], slot, layer) as KeyAction | null;
         if (!action) unknown.push(`${key}: ${toHex(Uint8Array.from(this.keymapRaw[layer][slot]), 4)}`);
@@ -363,7 +363,7 @@ export class GamakayHidDriver implements KeyboardDriver {
    */
   private async writeKeymap(profile: Profile): Promise<void> {
     if (!this.keymapRaw.base.length || !this.keymapRaw.fn.length) throw new Error('Tastenbelegung wurde noch nicht gelesen.');
-    const changes = (['base', 'fn'] as const).flatMap((layer) => TK75_SLOTS.flatMap((key, slot) => {
+    const changes = (['base', 'fn'] as const).flatMap((layer) => TK75_KEYMAP_SLOTS.flatMap((key, slot) => {
       if (!key) return [];
       const to = actionFor(profile, layer, key);
       if (JSON.stringify(to) === JSON.stringify(this.keymapRead[layer][key] ?? { kind: 'default' })) return [];

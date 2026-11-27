@@ -1,6 +1,6 @@
 import type { ConfigSection, DeviceConfig, LightingConfig } from './model';
 import {
-  LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_SLOTS, describeRawEntry,
+  LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_DEFAULT_MATRIX, TK75_KEYMAP_SLOTS, TK75_KNOB_SLOTS, describeRawEntry,
 } from './gamakay/protocol';
 
 export interface DeviceInfo {
@@ -28,6 +28,8 @@ export interface Capabilities {
   sideSpeedMax: number;
   /** Werksbelegung der Fn-Ebene zur Anzeige („Standard“): Taste, Funktion oder fester Text */
   factoryFn?: Record<string, { code?: string; fn?: string; label?: string }>;
+  /** Werksbelegung der Basis-Ebene für Teile ohne eigene Beschriftung (Drehknopf) */
+  factoryBase?: Record<string, { code?: string; fn?: string; label?: string }>;
 }
 
 export interface KeyboardDriver {
@@ -58,7 +60,11 @@ export const TK75_CAPABILITIES: Capabilities = {
   lightLevels: 4,
   sideLightEffects: SIDE_LED_EFFECTS.map(({ id, label, rainbowOnly }) => ({ id, label, rainbowOnly })),
   sideSpeedMax: SIDE_SPEED_MAX,
-  factoryFn: Object.fromEntries(TK75_SLOTS.flatMap((key, slot) => {
+  factoryBase: Object.fromEntries(Object.entries(TK75_KNOB_SLOTS).flatMap(([key, slot]) => {
+    const d = describeRawEntry(TK75_DEFAULT_MATRIX[slot]);
+    return d ? [[key, d]] : [];
+  })),
+  factoryFn: Object.fromEntries(TK75_KEYMAP_SLOTS.flatMap((key, slot) => {
     const d = key ? describeRawEntry(TK75_DEFAULT_FN_MATRIX[slot]) : null;
     return key && d ? [[key, d]] : [];
   })),

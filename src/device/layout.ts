@@ -88,7 +88,15 @@ const BASE_LABELS: Record<string, string> = {
   ContextMenu: 'Menü', NumLock: 'Num', NumpadEnter: 'Num ⏎', NumpadDivide: 'Num /',
   NumpadMultiply: 'Num *', NumpadSubtract: 'Num -', NumpadAdd: 'Num +', NumpadDecimal: 'Num ,',
   MetaRight: 'Win R',
+  KnobLeft: 'Knopf ⟲', KnobRight: 'Knopf ⟳', KnobPress: 'Knopf drücken',
 };
+
+/** Drehknopf als drei belegbare „Tasten“ (nur Tastenbelegung). */
+export const KNOB_PARTS = [
+  { id: 'KnobLeft', icon: '⟲', title: 'Knopf nach links drehen' },
+  { id: 'KnobPress', icon: '●', title: 'Knopf drücken' },
+  { id: 'KnobRight', icon: '⟳', title: 'Knopf nach rechts drehen' },
+] as const;
 
 const DE_LABELS: Record<string, string> = {
   Backquote: '^', Minus: 'ß', Equal: '´', Delete: 'Entf', Home: 'Pos1', PageUp: 'Bild↑', PageDown: 'Bild↓',

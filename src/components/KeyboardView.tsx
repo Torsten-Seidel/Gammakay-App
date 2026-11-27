@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { describeAction, describeFactory } from '../device/keycodes';
-import { KNOB, LAYOUTS, LAYOUT_HEIGHT, LAYOUT_WIDTH, keyLabel, type KeyDef } from '../device/layout';
+import { KNOB, KNOB_PARTS, LAYOUTS, LAYOUT_HEIGHT, LAYOUT_WIDTH, keyLabel, type KeyDef } from '../device/layout';
 import { actionFor, switchFor, type KeyId, type LightingConfig } from '../device/model';
 import { useApp, useCapabilities, useMacros, useProfile } from '../store';
 import { PRESS_LIFETIME, REACTIVE, previewFrame, type PreviewKey, type PreviewPress } from './lightPreview';
@@ -101,7 +101,7 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
   const layer = useApp((s) => s.layer);
   const selected = useApp((s) => s.selected);
   const macros = useMacros();
-  const factoryFn = useCapabilities().factoryFn;
+  const { factoryFn, factoryBase: baseKnob } = useCapabilities();
   const toggleKey = useApp((s) => s.toggleKey);
   const profile = useProfile();
   const keys = LAYOUTS[layout];
@@ -191,10 +191,32 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
         );
       })}
       <div
-        className="knob"
+        className={`knob ${view === 'keymap' ? 'editable' : ''}`}
         title="Drehregler"
         style={{ left: KNOB.x * UNIT + 12, top: KNOB.y * UNIT + 12, width: UNIT - GAP, height: UNIT - GAP }}
-      />
+      >
+        {view === 'keymap' && profile && KNOB_PARTS.map((part) => {
+          const action = actionFor(profile, layer, part.id);
+          const text = action.kind === 'default'
+            ? (layer === 'fn' ? describeFactory(factoryFn?.[part.id], layout) : describeFactory(baseKnob?.[part.id], layout))
+            : describeAction(action, layout, macros);
+          return (
+            <button
+              key={part.id}
+              type="button"
+              className={[
+                'knob-part',
+                selected.includes(part.id) && 'selected',
+                action.kind !== 'default' && 'remapped',
+              ].filter(Boolean).join(' ')}
+              title={`${part.title}${text ? `: ${text}` : ''}`}
+              onMouseDown={(e) => toggleKey(part.id, e.ctrlKey || e.shiftKey || e.metaKey)}
+            >
+              {part.icon}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

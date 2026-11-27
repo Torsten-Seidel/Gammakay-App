@@ -408,6 +408,13 @@ const defaultEntry = (slot: number, layer: MatrixLayer) =>
 /** Platz → physische Taste (fest, aus der Werks-Matrix). */
 export const TK75_SLOTS: readonly (string | undefined)[] = decodeKeyMatrix(TK75_DEFAULT_MATRIX.flat());
 
+/** Drehknopf: eigene Plätze ohne Magnetschalter (nur Belegung). 96–98 (`13 01 …`) bleiben unangetastet. */
+export const TK75_KNOB_SLOTS: Record<string, number> = { KnobLeft: 90, KnobRight: 91, KnobPress: 92 };
+
+/** Alle belegbaren Plätze: Tasten + Drehknopf. */
+export const TK75_KEYMAP_SLOTS: readonly (string | undefined)[] = TK75_SLOTS.map((key, slot) =>
+  key ?? Object.entries(TK75_KNOB_SLOTS).find(([, s]) => s === slot)?.[0]);
+
 /** KeyboardEvent.code → HID-Usage. Bei doppelter Belegung (49/50 = Backslash) gilt der Wert der Werks-Matrix. */
 const CODE_TO_HID: Record<string, number> = (() => {
   const m: Record<string, number> = {};
