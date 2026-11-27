@@ -12,6 +12,7 @@ const RESPONSE_DELAY_MS = 12;
 const MAX_POLLS = 10;
 const AFTER_WRITE_MS = 2000;
 const BT_TIMEOUT_MS = 1000;
+const BT_SEND_TIMEOUT_MS = 3000;
 
 function toBytes(view: DataView): Uint8Array {
   return new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
@@ -233,7 +234,19 @@ export class BtTransport extends QueuedTransport implements Transport {
     const out = new Uint8Array(PACKET_SIZE + 1);
     out.set(body);
     log('out', `OUT #6 ${toHex(out, 16)}`);
-    await this.device.sendReport(BT_REPORT_ID, out);
+    // Ist die Bluetooth-Verbindung weg, kehrt sendReport nie zurück (beobachtet 2026-11-27) → nicht ewig warten.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        this.device.sendReport(BT_REPORT_ID, out),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(
+            'Bluetooth-Verbindung unterbrochen – Taste drücken, damit die Tastatur aufwacht, dann neu verbinden.')), BT_SEND_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /** Senden und auf die erste passende Antwort warten (null bei Zeitüberschreitung). */

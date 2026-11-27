@@ -241,8 +241,12 @@ Reihenfolge Art 7, 0, 2, 3, 6, fb; nur das **allerletzte** Paket der ganzen Folg
 - Die App nutzt es ab 6 geänderten Tasten und schickt nur Tabellen, die sich ändern. Grundlage ist die zuletzt gelesene
   Tabelle, Plätze ohne bekannte Taste (z. B. Drehknopf) bleiben unverändert.
 - Geprüft: alle 82 Tasten 2,00 → 1,80 → 2,00 mm (je 5 Pakete) inkl. Kontroll-Lesen: Kabel ~2,5 s, Bluetooth ~2,2 s, Empfänger ~6,2 s.
+- Alle 82 Tasten RT an 0,20/0,25 mm + Totzone 0,10/0,20 mm und zurück (Tabellen 7, 2, 3, 6, fb = 21 Pakete):
+  Kabel ~3,8 s, Bluetooth ~4,5 s, Empfänger ~9 s.
+- Bluetooth-Trennung: Nach ~1,5 min ohne Befehle war die BT-Verbindung einmal weg; `sendReport` kehrte dann nie zurück,
+  nichts wurde übernommen (ohne Ende-Kennzeichen speichert die Tastatur nicht). Die App bricht das Senden jetzt nach 3 s mit Fehler ab.
 
 ## Offen / nächste Mitschnitte
 
-1. Sammelschreiben mit RT/Totzonen prüfen; Rückstellpunkt (Art 1), Continuous RT.
+1. Rückstellpunkt (Art 1), Continuous RT.
 2. Tastenbelegung schreiben (`0a`).
