@@ -1,20 +1,20 @@
 import type { DeviceSettings } from '../device/model';
 import type { LayoutVariant } from '../device/layout';
 import { useApp, useCapabilities } from '../store';
-import { Card, EmptyHint, PanelHeader } from '../components/ui';
+import { Card, EmptyHint, PanelHeader, Slider } from '../components/ui';
 
-const TIMERS: { key: keyof DeviceSettings; label: string; hint?: string }[] = [
-  { key: 'standbyMin', label: 'Standby nach', hint: '0 = nie' },
-  { key: 'backlightOff24gMin', label: 'Beleuchtung aus (2.4G) nach' },
-  { key: 'backlightOffBtMin', label: 'Beleuchtung aus (Bluetooth) nach' },
-  { key: 'btSleepMin', label: 'Bluetooth-Schlafmodus nach' },
+// Grenzen wie in GearHub für die TK75 TMR (Minuten)
+const TIMERS: { key: keyof DeviceSettings; label: string; min: number; max: number }[] = [
+  { key: 'backlightOffBtMin', label: 'Bluetooth: Beleuchtung aus nach', min: 1, max: 60 },
+  { key: 'backlightOff24gMin', label: '2,4 GHz: Beleuchtung aus nach', min: 1, max: 60 },
+  { key: 'deepSleepBtMin', label: 'Bluetooth: Tiefschlaf nach', min: 10, max: 60 },
+  { key: 'deepSleep24gMin', label: '2,4 GHz: Tiefschlaf nach', min: 10, max: 60 },
 ];
 
 export function DevicePanel() {
   const settings = useApp((s) => s.config?.settings);
   const rates = useCapabilities().pollingRates;
   const info = useApp((s) => s.driver?.info);
-  const isHid = !!info && info.transport !== 'mock';
   const layout = useApp((s) => s.layout);
   const setLayout = useApp((s) => s.setLayout);
   const edit = useApp((s) => s.edit);
@@ -36,16 +36,11 @@ export function DevicePanel() {
           <EmptyHint>8 kHz nur per USB-Kabel; kabellos sind meist max. 1 kHz möglich. Wirkt nach „Übernehmen“.</EmptyHint>
         </Card>
         <Card title="Energiesparen">
-          {isHid && <EmptyHint>Die Zeiten werden bisher nur gelesen – Ändern folgt nach dem nächsten Mitschnitt.</EmptyHint>}
           {TIMERS.map((t) => (
-            <label key={t.key} className="field inline spread">
-              <span>{t.label}{t.hint && <small> ({t.hint})</small>}</span>
-              <span>
-                <input type="number" min={0} max={120} value={settings[t.key]}
-                  onChange={(e) => set({ [t.key]: Math.max(0, Math.min(120, Number(e.target.value) || 0)) })} /> min
-              </span>
-            </label>
+            <Slider key={t.key} label={t.label} unit="min" value={settings[t.key]} min={t.min} max={t.max} step={1}
+              onChange={(v) => set({ [t.key]: v })} />
           ))}
+          <EmptyHint>Gilt nur kabellos. Wirkt nach „Übernehmen“.</EmptyHint>
         </Card>
         <Card title="App & Gerät">
           <label className="field inline spread">

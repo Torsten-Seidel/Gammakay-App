@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
-  decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, speedToRaw,
+  decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
 } from './protocol.ts';
 
 const bytes = (s: string) => s.trim().split(/\s+/).map((h) => parseInt(h, 16));
@@ -120,6 +120,14 @@ test('Empfänger-Status (F7) aus dem Mitschnitt', () => {
   assert.equal(decodeDongleStatus(bytes('00 00 50 01 00 01 02 00 00')).keyboard, false); // nur Maus
 });
 
+test('Energiespar-Zeiten schreiben (GearHub setSleepTime)', () => {
+  const t = { backlightBt: 120, backlight24g: 300, deepBt: 1680, deep24g: 3600 };
+  assert.deepEqual(Array.from(sleepPacket(t).slice(0, 16)), bytes('11 00 00 00 00 00 00 ee 78 00 2c 01 90 06 10 0e'));
+  assert.throws(() => sleepPacket({ ...t, backlightBt: 30 })); // unter 1 min
+  assert.throws(() => sleepPacket({ ...t, deepBt: 300 })); // Tiefschlaf unter 10 min
+  assert.throws(() => sleepPacket({ ...t, deep24g: 7200 })); // über 60 min
+});
+
 test('Polling-Rate lesen und schreiben', () => {
   assert.equal(decodeReportRate(bytes('83 00 00 00 00 00 00 7c')), 8000); // Mitschnitt beim Verbinden
   assert.equal(decodeReportRate(bytes('83 00 03 00 00 00 00 79')), 1000);
@@ -130,7 +138,8 @@ test('Polling-Rate lesen und schreiben', () => {
 });
 
 test('Energiespar-Zeiten und Geräteinfo werden dekodiert', () => {
-  assert.deepEqual(decodeSleep(bytes('91 00 00 00 00 00 00 6e 78 00 78 00 90 06 90 06')), [120, 120, 1680, 1680]);
+  assert.deepEqual(decodeSleep(bytes('91 00 00 00 00 00 00 6e 78 00 78 00 90 06 90 06')),
+    { backlightBt: 120, backlight24g: 120, deepBt: 1680, deep24g: 1680 });
   const info = bytes('ad 02 01 ff ff 01 00 00 07 0e 00 00 00 52 59 35 30 36 30 52 59 35 30 00 00');
   assert.equal(decodeInfoName(info), 'RY5060RY50');
 });

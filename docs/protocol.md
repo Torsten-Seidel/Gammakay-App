@@ -184,7 +184,28 @@ SET 08 00 00 00 07 fa ff fa fd   Ausschalten (= Ursprungszustand)
 - Auf der Tastatur bestätigt (2026-11-27, USB): 8 kHz → 1 kHz geschrieben, nach Neuverbinden 1 kHz gelesen.
   Die Tastatur bleibt dabei verbunden (keine Neuanmeldung).
 
+## Energiespar-Zeiten (aus dem GearHub-Treiber, `setSleepTime`/`getSleepTime`)
+
+- Lesen `91`, Schreiben `11 00 00 00 00 00 00 <Prüfsumme Byte 7>`; ab Byte 8 vier 16-Bit-Werte (LE) in **Sekunden**:
+
+  | Bytes | Bedeutung (GearHub, deutsch) |
+  |---|---|
+  | 8–9 | Bluetooth: Hintergrundbeleuchtung ausschalten |
+  | 10–11 | 2,4G: Hintergrundbeleuchtung ausschalten |
+  | 12–13 | Bluetooth: Tiefschlafzeit |
+  | 14–15 | 2,4G: Tiefschlafzeit |
+
+- Die erste Annahme („Standby“, Reihenfolge 2,4G/BT) war falsch und ist korrigiert.
+- Grenzen laut GearHubs Geräteliste (TK75 TMR v6): Beleuchtung 1–60 min, Tiefschlaf 10–60 min
+  (Standard 2 / 30 min). Ältere TK75-Einträge erlauben 0–18 h; die App nutzt die engeren Grenzen.
+- Gelesen: 120 / 120 / 1680 / 1680 s = 2 / 2 / 28 / 28 min.
+
+- Auf der Tastatur bestätigt (2026-11-27): Schreiben und Zurücklesen über USB, Bluetooth (`55 11 …`) und
+  Empfänger.
+- Empfänger: Direkt nach einem Moduswechsel antwortet die Tastatur langsamer als GearHubs 5 × 100 ms Wartezeit;
+  die App wartet bis ca. 2,5 s.
+
 ## Offen / nächste Mitschnitte
 
-1. Energiespar-Zeiten (`91`/`11`).
+1. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).
 3. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).

@@ -90,10 +90,12 @@ export interface Macro {
 
 export interface DeviceSettings {
   pollingRate: number;
-  standbyMin: number; // 0 = nie
-  backlightOff24gMin: number;
+  /** Beleuchtung aus nach … Minuten (Bluetooth / 2,4 GHz), 1–60 */
   backlightOffBtMin: number;
-  btSleepMin: number;
+  backlightOff24gMin: number;
+  /** Tiefschlaf nach … Minuten (Bluetooth / 2,4 GHz), 10–60 */
+  deepSleepBtMin: number;
+  deepSleep24gMin: number;
 }
 
 export interface DisplayConfig {
@@ -154,7 +156,7 @@ export function createDefaultConfig(profileCount = 4): DeviceConfig {
     activeProfile: 0,
     profiles: Array.from({ length: profileCount }, (_, i) => defaultProfile(i)),
     macros: [],
-    settings: { pollingRate: 8000, standbyMin: 10, backlightOff24gMin: 2, backlightOffBtMin: 2, btSleepMin: 28 },
+    settings: { pollingRate: 8000, backlightOffBtMin: 2, backlightOff24gMin: 2, deepSleepBtMin: 30, deepSleep24gMin: 30 },
     display: { slot: 1, intervalMs: 50, frames: [] },
   };
 }

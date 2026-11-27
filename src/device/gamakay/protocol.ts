@@ -35,6 +35,7 @@ export const CMD = {
   GET_SIDE_LED: 0x88,
   GET_SLEEP: 0x91,
   GET_REPORT_RATE: 0x83,
+  SET_SLEEP: 0x11,
   SET_REPORT_RATE: 0x03,
   SET_LED: 0x07,
   SET_SIDE_LED: 0x08,
@@ -266,9 +267,42 @@ export function reportRatePacket(rate: number): Uint8Array {
 
 // ---------- Energiesparen ----------
 
-/** Vier 16-Bit-Werte (Little Endian) ab Byte 8, in Sekunden. Reihenfolge noch nicht sicher. */
-export function decodeSleep(res: ArrayLike<number>): number[] {
-  return [0, 1, 2, 3].map((i) => (res[8 + i * 2] ?? 0) | ((res[9 + i * 2] ?? 0) << 8));
+/** Zeiten in Sekunden (GearHub setSleepTime/getSleepTime). */
+export interface SleepTimes {
+  /** Bluetooth: Beleuchtung ausschalten nach */
+  backlightBt: number;
+  /** 2,4 GHz: Beleuchtung ausschalten nach */
+  backlight24g: number;
+  /** Bluetooth: Tiefschlaf nach */
+  deepBt: number;
+  /** 2,4 GHz: Tiefschlaf nach */
+  deep24g: number;
+}
+
+/** Grenzen in Sekunden; gelten für alle TK75-TMR-Einträge in GearHubs Geräteliste. */
+export const SLEEP_LIMITS = {
+  backlight: { min: 60, max: 3600 },
+  deep: { min: 600, max: 3600 },
+} as const;
+
+const u16 = (res: ArrayLike<number>, at: number) => (res[at] ?? 0) | ((res[at + 1] ?? 0) << 8);
+
+/** Antwort auf `91`: ab Byte 8 vier 16-Bit-Werte (Little Endian): BT, 2,4G, Tief-BT, Tief-2,4G. */
+export function decodeSleep(res: ArrayLike<number>): SleepTimes {
+  return { backlightBt: u16(res, 8), backlight24g: u16(res, 10), deepBt: u16(res, 12), deep24g: u16(res, 14) };
+}
+
+/** Schreibpaket `11 … <Prüfsumme Byte 7> | BT | 2,4G | Tief-BT | Tief-2,4G` (Sekunden, LE). */
+export function sleepPacket(t: SleepTimes): Uint8Array {
+  const check = (name: string, v: number, lim: { min: number; max: number }) => {
+    if (!Number.isInteger(v) || v < lim.min || v > lim.max) throw new Error(`${name} ${v} s außerhalb ${lim.min}–${lim.max} s`);
+  };
+  check('Beleuchtung aus (Bluetooth)', t.backlightBt, SLEEP_LIMITS.backlight);
+  check('Beleuchtung aus (2,4 GHz)', t.backlight24g, SLEEP_LIMITS.backlight);
+  check('Tiefschlaf (Bluetooth)', t.deepBt, SLEEP_LIMITS.deep);
+  check('Tiefschlaf (2,4 GHz)', t.deep24g, SLEEP_LIMITS.deep);
+  const le = (v: number) => [v & 0xff, v >> 8];
+  return makePacket([CMD.SET_SLEEP], 7, [...le(t.backlightBt), ...le(t.backlight24g), ...le(t.deepBt), ...le(t.deep24g)]);
 }
 
 // ---------- Geräteinfo ----------

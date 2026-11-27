@@ -111,7 +111,8 @@ export class DongleTransport extends QueuedTransport implements Transport {
   }
 
   private async waitFor(flag: 'canSend' | 'canRead'): Promise<void> {
-    for (let i = 0; i < 5; i++) {
+    // Nach einem Moduswechsel braucht die Tastatur über Funk länger als GearHubs 5 × 100 ms → bis ca. 2,5 s warten.
+    for (let i = 0; i < 20; i++) {
       await sleep(100);
       if ((await this.status())[flag]) return;
     }

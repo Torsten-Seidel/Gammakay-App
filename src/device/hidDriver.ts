@@ -6,7 +6,7 @@ import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, ledPacket, type LedState,
+  decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
 
@@ -85,6 +85,11 @@ export class GamakayHidDriver implements KeyboardDriver {
         await driver.transport.close().catch(() => undefined);
       }
     }
+    // Wege sind freigegeben, aber keiner antwortet: Auswahlfenster hilft hier nicht weiter.
+    if (known.length) {
+      throw new Error('Die Tastatur antwortet nicht. Ist sie eingeschaltet und wach (einmal eine Taste drücken)? ' +
+        'Dann erneut „Tastatur verbinden“.');
+    }
     let device: HIDDevice | undefined;
     {
       const picked = await navigator.hid.requestDevice({
@@ -137,15 +142,14 @@ export class GamakayHidDriver implements KeyboardDriver {
         },
       };
     }
-    // Reihenfolge der vier Zeiten ist eine Annahme (Mitschnitt: 120, 120, 1680, 1680 s).
     const min = (s: number) => Math.round(s / 60);
     cfg.settings = {
       ...cfg.settings,
       pollingRate: rate ?? cfg.settings.pollingRate,
-      backlightOff24gMin: min(sleep[0]),
-      backlightOffBtMin: min(sleep[1]),
-      standbyMin: min(sleep[2]),
-      btSleepMin: min(sleep[3]),
+      backlightOffBtMin: min(sleep.backlightBt),
+      backlightOff24gMin: min(sleep.backlight24g),
+      deepSleepBtMin: min(sleep.deepBt),
+      deepSleep24gMin: min(sleep.deep24g),
     };
     this.settings = { ...cfg.settings };
     const effectName = LED_EFFECTS.find((e) => e.code === this.led!.mode)?.label ?? `unbekannt 0x${this.led.mode.toString(16)}`;
@@ -198,19 +202,33 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (!keyChanged && !sideChanged) log('info', 'Licht unverändert – nichts gesendet.');
   }
 
-  /** Bisher nur die Polling-Rate; Energiespar-Zeiten sind noch nicht freigegeben. */
+  /** Polling-Rate und Energiespar-Zeiten; nur was sich gegenüber dem Gerät ändert, wird gesendet. */
   private async writeSettings(wanted: DeviceSettings): Promise<void> {
     if (!this.settings) throw new Error('Einstellungen wurden noch nicht gelesen.');
-    const { pollingRate, ...rest } = wanted;
-    const { pollingRate: current, ...currentRest } = this.settings;
-    if (JSON.stringify(rest) !== JSON.stringify(currentRest)) {
-      throw new Error('Energiespar-Zeiten kann die App noch nicht schreiben – bitte diese Änderung verwerfen.');
+    const cur = this.settings;
+    const sleepKeys = ['backlightOffBtMin', 'backlightOff24gMin', 'deepSleepBtMin', 'deepSleep24gMin'] as const;
+    // Pakete erst bauen (prüft die Grenzen), dann senden.
+    const sleep = sleepKeys.some((k) => wanted[k] !== cur[k])
+      ? sleepPacket({
+        backlightBt: wanted.backlightOffBtMin * 60,
+        backlight24g: wanted.backlightOff24gMin * 60,
+        deepBt: wanted.deepSleepBtMin * 60,
+        deep24g: wanted.deepSleep24gMin * 60,
+      })
+      : null;
+    const rate = wanted.pollingRate !== cur.pollingRate ? reportRatePacket(wanted.pollingRate) : null;
+    if (rate) {
+      await this.transport.write(rate);
+      await new Promise((r) => setTimeout(r, 300)); // GearHub: kurze Pause nach dem Umschalten
+      const r = wanted.pollingRate;
+      log('info', `Polling-Rate geschrieben: ${r >= 1000 ? `${r / 1000} kHz` : `${r} Hz`}`);
     }
-    if (pollingRate === current) return;
-    await this.transport.write(reportRatePacket(pollingRate));
-    await new Promise((r) => setTimeout(r, 300)); // GearHub: kurze Pause nach dem Umschalten
-    this.settings = { ...this.settings, pollingRate };
-    log('info', `Polling-Rate geschrieben: ${pollingRate >= 1000 ? `${pollingRate / 1000} kHz` : `${pollingRate} Hz`}`);
+    if (sleep) {
+      await this.transport.write(sleep);
+      log('info', `Energiespar-Zeiten geschrieben: Licht aus BT ${wanted.backlightOffBtMin} / 2,4G ${wanted.backlightOff24gMin} min, ` +
+        `Tiefschlaf BT ${wanted.deepSleepBtMin} / 2,4G ${wanted.deepSleep24gMin} min`);
+    }
+    this.settings = { ...wanted };
   }
 
   private sidePacketFor(side: SideLight): Uint8Array {
