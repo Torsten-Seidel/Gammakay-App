@@ -5,6 +5,7 @@ import {
 } from './protocol';
 
 const DONGLE_GAP_MS = 10; // GearHub: INTERVAL_24G_TIME
+const DONGLE_POLL_MS = 20;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const RESPONSE_DELAY_MS = 12;
@@ -138,10 +139,12 @@ export class DongleTransport extends QueuedTransport implements Transport {
 
   private async waitFor(flag: 'canSend' | 'canRead'): Promise<void> {
     // Nach einem Moduswechsel braucht die Tastatur über Funk länger als GearHubs 5 × 100 ms → bis ca. 2,5 s warten.
-    for (let i = 0; i < 20; i++) {
-      await sleep(100);
+    // Sofort nachsehen und dann in kurzen Abständen: feste 100 ms vor jeder Abfrage machten das Lesen sehr langsam.
+    const until = Date.now() + 2500;
+    do {
       if ((await this.status())[flag]) return;
-    }
+      await sleep(DONGLE_POLL_MS);
+    } while (Date.now() < until);
     throw new Error(flag === 'canSend'
       ? 'Tastatur über den Empfänger nicht erreichbar (ausgeschaltet oder im Ruhezustand?)'
       : 'Keine Antwort der Tastatur über den Empfänger');
