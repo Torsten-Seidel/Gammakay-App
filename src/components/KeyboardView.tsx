@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
-import { describeAction } from '../device/keycodes';
+import { describeAction, describeFactory } from '../device/keycodes';
 import { KNOB, LAYOUTS, LAYOUT_HEIGHT, LAYOUT_WIDTH, keyLabel, type KeyDef } from '../device/layout';
 import { actionFor, switchFor, type KeyId, type LightingConfig } from '../device/model';
-import { useApp, useMacros, useProfile } from '../store';
+import { useApp, useCapabilities, useMacros, useProfile } from '../store';
 import { PRESS_LIFETIME, REACTIVE, previewFrame, type PreviewKey, type PreviewPress } from './lightPreview';
 
 const UNIT = 54;
@@ -101,6 +101,7 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
   const layer = useApp((s) => s.layer);
   const selected = useApp((s) => s.selected);
   const macros = useMacros();
+  const factoryFn = useCapabilities().factoryFn;
   const toggleKey = useApp((s) => s.toggleKey);
   const profile = useProfile();
   const keys = LAYOUTS[layout];
@@ -132,8 +133,15 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
       {keys.map((def) => {
         const isSelected = view !== 'diagnose' && !isLight && selected.includes(def.id);
         let sub = '';
+        let remapped = false;
         if (profile) {
-          if (view === 'keymap') sub = describeAction(actionFor(profile, layer, def.id), layout, macros);
+          if (view === 'keymap') {
+            const action = actionFor(profile, layer, def.id);
+            remapped = action.kind !== 'default';
+            sub = action.kind === 'default' && layer === 'fn'
+              ? describeFactory(factoryFn?.[def.id], layout)
+              : describeAction(action, layout, macros);
+          }
           if (view === 'switches') {
             const sw = switchFor(profile, def.id);
             sub = `${sw.actuation.toFixed(2)}${sw.rapidTrigger ? ' RT' : ''}`;
@@ -151,7 +159,7 @@ export function KeyboardView({ pressed = [] }: { pressed?: KeyId[] }) {
           isSelected && 'selected',
           def.isoEnter && 'iso-enter',
           pressed.includes(def.id) && 'pressed',
-          sub && view === 'keymap' && 'remapped',
+          remapped && view === 'keymap' && 'remapped',
         ].filter(Boolean).join(' ');
         return (
           <button

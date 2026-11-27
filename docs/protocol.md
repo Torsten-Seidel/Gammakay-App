@@ -278,7 +278,13 @@ danach vendorSleep 100 ms; die App wartet 150 ms und liest die Matrix zur Kontro
 - System: 0 Windows, 1 Mac, 2 iOS, 3 Android (`_解码fnSys`). Die App liest/schreibt nur Windows (0); Mac ist anders belegt
   (z. B. Launchpad `03 00 a0 02`, Siri `12 00 e3 2c`).
 - Werks-Fn (Windows, in `TK75_DEFAULT_FN_MATRIX`): Fn+Esc Reset `0a 02`, Fn+1/2/3 BT1–3 `0e 00 00–02`, Fn+4 2,4 GHz,
-  Fn+5 Kabel, Fn+Z/X/C (ISO: Y/X/C) Profil 1–3 `08 00 04 00–02`, Medien auf F1–F12, Licht auf den Pfeiltasten. Leere Plätze `00 00 00 00` = unbelegt.
+  Fn+Leertaste Akkustand `0a 08` (leuchtet als Balken auf 1–0, geprüft). **Fn+Pos1 = `0a 18` (in GearHub ohne Namen) wählt, welches
+  Licht die Licht-Kürzel steuern** (Tasten- oder Seitenlicht; geprüft: danach senkte Fn+↓ die Tastenlicht-Helligkeit 4 → 0).
+  Die Wahl bleibt nach Aus-/Einschalten erhalten (geprüft); lesen/setzen per Befehl ist noch unbekannt.
+  Fn+Pfeile/Zurück/# wirken auf das gewählte Licht; im Test war zuerst das **Seitenlicht** gewählt (`0d 02/03/05`: Fn+↓ senkte
+  die Seitenlicht-Helligkeit 4 → 1, Fn+Zurück schaltet den Farbmodus weiter: 7 eigene Farbe → 8 bunt → 0 Rot … 6 Magenta → 7;
+  Farbliste wie GearHub `COMMONCOLOR`: 0 ff0000, 1 ff8000, 2 ffff00, 3 00ff00, 4 00ffff, 5 0000ff, 6 ff00ff; RGB-Bytes bleiben dabei stehen),
+  Fn+# (`0d 01 00`, „Effekt wechseln“) wechselte dabei den Seitenlicht-Effekt (Schlange 05 → Atmen 02). Fn+5 Kabel, Fn+Z/X/C (ISO: Y/X/C) Profil 1–3 `08 00 04 00–02`, Medien auf F1–F12, Licht auf den Pfeiltasten. Leere Plätze `00 00 00 00` = unbelegt.
 - Geprüft: Fn+A → Stumm → F11 → Werk (unbelegt) inkl. Kontroll-Lesen: Kabel ~2,3 s, Bluetooth ~2,2 s, Empfänger ~6 s.
 
 ## Offen / nächste Mitschnitte

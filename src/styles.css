@@ -97,6 +97,7 @@ small { color: var(--text-dim); }
 .key { position: absolute; border: 1px solid #2f3440; border-radius: 6px; background: linear-gradient(180deg, #2a2e37, #22262e); box-shadow: 0 3px 0 #15171c; color: var(--text); display: flex; flex-direction: column; justify-content: space-between; align-items: flex-start; padding: 5px 7px; font-size: 12px; cursor: pointer; overflow: hidden; transition: transform 0.05s, border-color 0.1s; }
 .key:hover { border-color: #4a5060; }
 .key.iso-enter { clip-path: polygon(0 0, 100% 0, 100% 100%, 16.7% 100%, 16.7% 48%, 0 48%); }
+.key.iso-enter .key-sub { margin-left: 16.7%; max-width: 83%; }
 .key.lit { box-shadow: 0 3px 0 #15171c, inset 0 0 0 1px var(--key-glow), inset 0 -16px 22px -12px var(--key-glow); }
 .key.remapped .key-sub { color: var(--accent-strong); }
 .key.selected { border-color: var(--accent); background: linear-gradient(180deg, #3a3460, #2c2846); }

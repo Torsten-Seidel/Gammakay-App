@@ -202,8 +202,8 @@ export function Welcome() {
       )}
       {error && <p className="error-text">{error}</p>}
       <p className="hint">
-        Mit der echten Tastatur liest und schreibt die App Licht, Seitenlicht, Polling-Rate, Energiespar-Zeiten sowie
-        Auslösepunkt, Rapid Trigger und Totzonen. Kabellos zeigt sie zusätzlich den Akkustand. Bitte GearHub vorher schließen.
+        Mit der echten Tastatur liest und schreibt die App Licht, Seitenlicht, Polling-Rate, Energiespar-Zeiten, Tastenbelegung (mit Fn-Ebene)
+        sowie Auslöse- und Rückstellpunkt, Rapid Trigger und Totzonen. Kabellos zeigt sie zusätzlich den Akkustand. Bitte GearHub vorher schließen.
       </p>
     </div>
   );

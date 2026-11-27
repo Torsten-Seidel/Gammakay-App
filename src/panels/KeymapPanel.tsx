@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { FUNCTIONS, describeAction } from '../device/keycodes';
+import { FUNCTIONS, describeAction, describeFactory } from '../device/keycodes';
 import { keyLabel } from '../device/layout';
 import { actionFor, type KeyAction } from '../device/model';
-import { useApp, useMacros, useProfile } from '../store';
+import { useApp, useCapabilities, useMacros, useProfile } from '../store';
 import { Card, EmptyHint, KeyPalette, PanelHeader } from '../components/ui';
 
 type Tab = 'key' | 'combo' | 'function' | 'macro';
@@ -14,6 +14,7 @@ export function KeymapPanel() {
   const macros = useMacros();
   const editProfile = useApp((s) => s.editProfile);
   const profile = useProfile();
+  const factoryFn = useCapabilities().factoryFn;
   const [tab, setTab] = useState<Tab>('key');
   const [combo, setCombo] = useState<string[]>([]);
   if (!profile) return null;
@@ -27,7 +28,11 @@ export function KeymapPanel() {
     });
 
   const first = selected[0];
-  const current = first ? describeAction(actionFor(profile, layer, first), layout, macros) : '';
+  const firstAction = first ? actionFor(profile, layer, first) : null;
+  const factory = first && layer === 'fn' ? describeFactory(factoryFn?.[first], layout) : '';
+  const current = !firstAction ? ''
+    : firstAction.kind === 'default' ? `Standard${factory ? ` (${factory})` : layer === 'fn' ? ' (unbelegt)' : ''}`
+    : describeAction(firstAction, layout, macros);
 
   return (
     <div className="panel">

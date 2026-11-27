@@ -123,16 +123,23 @@ export interface LedState {
 
 const hex2 = (n: number) => n.toString(16).padStart(2, '0');
 
+/**
+ * Feste Farbliste der Tastatur (GearHub `COMMONCOLOR`): Farbmodus 0–6 wählt eine dieser Farben, die RGB-Bytes
+ * bleiben dann auf der zuletzt eigenen Farbe stehen. Kommt z. B. über Fn+Zurück (Seitenlicht-Farbe wechseln).
+ */
+export const PRESET_COLORS = ['#ff0000', '#ff8000', '#ffff00', '#00ff00', '#00ffff', '#0000ff', '#ff00ff'];
+
 export function decodeLed(res: ArrayLike<number>): LedState {
   const raw = Array.from({ length: 7 }, (_, i) => res[i + 1] ?? 0);
+  const colorMode = raw[3] & 0x0f;
   return {
     raw,
     mode: raw[0],
     speed: raw[1],
     brightness: raw[2],
-    colorMode: raw[3] & 0x0f,
+    colorMode,
     option: raw[3] >> 4,
-    color: `#${hex2(raw[4])}${hex2(raw[5])}${hex2(raw[6])}`,
+    color: PRESET_COLORS[colorMode] ?? `#${hex2(raw[4])}${hex2(raw[5])}${hex2(raw[6])}`,
   };
 }
 
@@ -425,6 +432,8 @@ export const FUNCTION_CODES: Record<string, readonly number[]> = {
   'light.brightDown': [13, 2, 2, 0],
   'light.speedUp': [13, 3, 1, 0],
   'light.speedDown': [13, 3, 2, 0],
+  'light.nextColor': [13, 5, 1, 0],
+  'light.target': [10, 24, 0, 0], // in GearHub ohne Namen; schaltet die Licht-Kürzel zwischen Tasten- und Seitenlicht um
   'conn.usb': [14, 0, 6, 0],
   'conn.24g': [14, 0, 5, 0],
   'conn.bt1': [14, 0, 0, 0],
@@ -473,6 +482,40 @@ export function decodeKeyAction(entry: ArrayLike<number>, slot: number, layer: M
   if (codes.some((c) => !c)) return null;
   if (e[1] === 0 && e[3] === 0) return { kind: 'key', code: codes[0] };
   return { kind: 'combo', codes };
+}
+
+/** Deutsche Namen für Sonderbelegungen, die die App (noch) nicht als Funktion anbietet (nur zur Anzeige). */
+const RAW_LABELS: Record<string, string> = {
+  '10,2,0,0': 'Reset',
+  '10,3,0,0': 'Win-Sperre',
+  '10,8,0,0': 'Akkustand',
+  '10,12,0,0': 'Energiesparen',
+  '3,0,131,1': 'Medienplayer',
+  '3,0,183,0': 'Stopp',
+  '3,0,138,1': 'Mail',
+  '3,0,35,2': 'Browser',
+  '3,0,148,1': 'Arbeitsplatz',
+  '3,0,146,1': 'Rechner',
+  '8,0,4,0': 'Profil 1',
+  '8,0,4,1': 'Profil 2',
+  '8,0,4,2': 'Profil 3',
+  '13,1,0,0': 'Effekt wechseln',
+  '19,2,0,0': 'Display wechseln',
+};
+
+/**
+ * Anzeige einer rohen Belegung: `{ code }` für eine normale Taste (die Oberfläche beschriftet sie je Layout),
+ * `{ fn }` für eine bekannte Funktion, `{ label }` für Sonderbelegungen; null = unbekannt oder leer.
+ */
+export function describeRawEntry(entry: ArrayLike<number>): { code?: string; fn?: string; label?: string } | null {
+  const e = Array.from(entry).slice(0, 4);
+  if (e.every((b) => b === 0)) return null;
+  const fn = Object.entries(FUNCTION_CODES).find(([, v]) => v.every((b, i) => b === e[i]));
+  if (fn) return { fn: fn[0] };
+  const label = RAW_LABELS[e.join(',')];
+  if (label) return { label };
+  if (e[0] === 0 && e[1] === 0 && e[3] === 0 && HID_TO_CODE[e[2]]) return { code: HID_TO_CODE[e[2]] };
+  return null;
 }
 
 /** Struktur wie KeyAction im Modell (protocol.ts bleibt importfrei). */

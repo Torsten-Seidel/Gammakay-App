@@ -48,11 +48,15 @@ export const FUNCTIONS: FunctionDef[] = [
   { id: 'media.prev', label: 'Zurück', group: 'Medien' },
   { id: 'media.next', label: 'Weiter', group: 'Medien' },
   { id: 'light.toggle', label: 'Licht an/aus', group: 'Licht' },
+  // TK75: Effekt/Helligkeit/Tempo/Farbe wirken auf das gewählte Licht; „Licht wählen“ (ab Werk Fn+Pos1) schaltet
+  // zwischen Tasten- und Seitenlicht um (geprüft 2026-11-28).
   { id: 'light.nextEffect', label: 'Nächster Effekt', group: 'Licht' },
   { id: 'light.brightUp', label: 'Heller', group: 'Licht' },
   { id: 'light.brightDown', label: 'Dunkler', group: 'Licht' },
   { id: 'light.speedUp', label: 'Schneller', group: 'Licht' },
   { id: 'light.speedDown', label: 'Langsamer', group: 'Licht' },
+  { id: 'light.nextColor', label: 'Farbe wechseln', group: 'Licht' },
+  { id: 'light.target', label: 'Licht wählen (Tasten/Seite)', group: 'Licht' },
   { id: 'conn.usb', label: 'USB-Modus', group: 'Verbindung' },
   { id: 'conn.24g', label: '2.4G-Modus', group: 'Verbindung' },
   { id: 'conn.bt1', label: 'Bluetooth 1', group: 'Verbindung' },
@@ -62,6 +66,16 @@ export const FUNCTIONS: FunctionDef[] = [
   { id: 'sys.winLock', label: 'Win-Sperre', group: 'System' },
   { id: 'sys.displayNext', label: 'Display: nächstes Bild', group: 'System' },
 ];
+
+/** Beschriftung der Werksbelegung (z. B. Fn+F4 = „Stumm“); '' = keine. */
+export function describeFactory(
+  entry: { code?: string; fn?: string; label?: string } | undefined, variant: LayoutVariant,
+): string {
+  if (!entry) return '';
+  if (entry.code) return keyLabel(entry.code, variant);
+  if (entry.fn) return FUNCTIONS.find((f) => f.id === entry.fn)?.label ?? entry.fn;
+  return entry.label ?? '';
+}
 
 export function describeAction(action: KeyAction, variant: LayoutVariant, macros: Macro[]): string {
   switch (action.kind) {

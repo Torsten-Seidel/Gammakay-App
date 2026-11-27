@@ -1,5 +1,7 @@
 import type { ConfigSection, DeviceConfig, LightingConfig } from './model';
-import { LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX } from './gamakay/protocol';
+import {
+  LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_SLOTS, describeRawEntry,
+} from './gamakay/protocol';
 
 export interface DeviceInfo {
   name: string;
@@ -24,6 +26,8 @@ export interface Capabilities {
   sideLightEffects: { id: string; label: string; rainbowOnly?: boolean }[];
   /** Höchste Tempostufe des Seitenlichts */
   sideSpeedMax: number;
+  /** Werksbelegung der Fn-Ebene zur Anzeige („Standard“): Taste, Funktion oder fester Text */
+  factoryFn?: Record<string, { code?: string; fn?: string; label?: string }>;
 }
 
 export interface KeyboardDriver {
@@ -54,4 +58,8 @@ export const TK75_CAPABILITIES: Capabilities = {
   lightLevels: 4,
   sideLightEffects: SIDE_LED_EFFECTS.map(({ id, label, rainbowOnly }) => ({ id, label, rainbowOnly })),
   sideSpeedMax: SIDE_SPEED_MAX,
+  factoryFn: Object.fromEntries(TK75_SLOTS.flatMap((key, slot) => {
+    const d = key ? describeRawEntry(TK75_DEFAULT_FN_MATRIX[slot]) : null;
+    return key && d ? [[key, d]] : [];
+  })),
 };

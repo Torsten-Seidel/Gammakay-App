@@ -258,3 +258,11 @@ test('Fn-Ebene: Werkstabelle, Standard je Ebene, Pakete', () => {
   const w = fnMatrixWritePacket(0, 9, [3, 0, 226, 0]);
   assert.deepEqual([...w.subarray(0, 12)], [0x10, 0, 0, 9, 0, 0, 0, 0xff - ((0x10 + 9) & 0xff), 3, 0, 226, 0]);
 });
+
+test('Licht lesen: Farbmodus 0–6 = feste Farbliste, 7 = eigene Farbe, 8 = bunt', () => {
+  // Seitenlicht nach Fn+Zurück: Farbmodus 05, RGB-Bytes noch auf der alten eigenen Farbe
+  assert.equal(decodeLed(bytes('88 05 00 04 05 8b 00 ff')).color, '#0000ff');
+  assert.equal(decodeLed(bytes('88 05 00 04 00 8b 00 ff')).color, '#ff0000');
+  assert.equal(decodeLed(bytes('88 05 00 04 07 8b 00 ff')).color, '#8b00ff');
+  assert.equal(decodeLed(bytes('88 05 00 04 08 8b 00 ff')).colorMode, 8);
+});
