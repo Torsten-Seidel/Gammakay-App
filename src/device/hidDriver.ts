@@ -1,11 +1,14 @@
 import type { KeyboardDriver } from './driver';
 import { TK75_CAPABILITIES } from './driver';
-import { log } from './log';
-import { createDefaultConfig, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig } from './model';
+import { log, toHex } from './log';
+import {
+  createDefaultConfig, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Profile, type SwitchConfig,
+} from './model';
 import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
+  MAGNETISM, PACKET_SIZE, TRAVEL_STEP, decodeKeyMatrix, decodeKeyMode, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -152,11 +155,76 @@ export class GamakayHidDriver implements KeyboardDriver {
       deepSleep24gMin: min(sleep.deep24g),
     };
     this.settings = { ...cfg.settings };
+    // Magnetschalter: nur lesen. Ein Fehler hier darf die Verbindung nicht kaputt machen.
+    try {
+      await this.readSwitches(cfg.profiles[cfg.activeProfile]);
+    } catch (e) {
+      log('info', `Schalterdaten nicht gelesen: ${String(e)}`);
+    }
     const effectName = LED_EFFECTS.find((e) => e.code === this.led!.mode)?.label ?? `unbekannt 0x${this.led.mode.toString(16)}`;
     log('info', `Gelesen: Licht ${effectName}, Tempo ${rawToSpeed(this.led.speed)}, Option ${this.led.option}, ` +
       `Helligkeit ${this.led.brightness}, ` +
       `${this.led.colorMode === COLOR_MODE_RAINBOW ? 'bunt' : `Farbe ${this.led.color}`}`);
     return cfg;
+  }
+
+  /** Mehrseitige Antwort lesen und als reine Daten (64 Byte je Seite) aneinanderhängen. */
+  private async readPages(packet: (page: number) => Uint8Array, pages: number, label: string): Promise<Uint8Array> {
+    const out = new Uint8Array(pages * PACKET_SIZE);
+    for (let page = 0; page < pages; page++) {
+      const res = await this.transport.queryRaw(packet(page));
+      if (page === 0) log('info', `${label} Seite 0 roh: ${toHex(res, 64)}`);
+      out.set(res.subarray(0, PACKET_SIZE), page * PACKET_SIZE);
+    }
+    return out;
+  }
+
+  /** Tastenzuordnung (8A) + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
+  private async readSwitches(profile: Profile): Promise<void> {
+    const matrix = await this.readPages((p) => keyMatrixReadPacket(0, p), 8, 'Matrix');
+    const slots = decodeKeyMatrix(matrix);
+    const u16 = async (kind: number, label: string) =>
+      decodeU16List(await this.readPages((p) => magnetismReadPacket(kind, p), 4, label));
+    const modes = await this.readPages((p) => magnetismReadPacket(MAGNETISM.modes, p), 2, 'Tastenmodus');
+    const travel = await u16(MAGNETISM.travel, 'Auslösepunkt');
+    const rtPress = await u16(MAGNETISM.rtPress, 'RT Drücken');
+    const rtRelease = await u16(MAGNETISM.rtRelease, 'RT Loslassen');
+    const dzBottom = await u16(MAGNETISM.deadzoneBottom, 'Totzone unten');
+    const dzTop = await this.readPages((p) => magnetismReadPacket(MAGNETISM.deadzoneTop, p), 2, 'Totzone oben');
+
+    const mm = (raw: number) => Math.round((raw / TRAVEL_STEP) * 100) / 100;
+    const perKey: Record<string, SwitchConfig> = {};
+    slots.forEach((key, i) => {
+      if (!key || perKey[key]) return;
+      perKey[key] = {
+        actuation: mm(travel[i]),
+        rapidTrigger: decodeKeyMode(modes[i]).rapidTrigger,
+        rtPress: mm(rtPress[i]),
+        rtRelease: mm(rtRelease[i]),
+        continuousRT: false, // noch nicht entschlüsselt
+        deadzoneTop: mm(dzTop[i]),
+        deadzoneBottom: mm(dzBottom[i]),
+      };
+    });
+
+    // Häufigste Einstellung = Standard, nur Abweichungen pro Taste ablegen (wie das Modell es erwartet).
+    const counts = new Map<string, number>();
+    for (const s of Object.values(perKey)) counts.set(JSON.stringify(s), (counts.get(JSON.stringify(s)) ?? 0) + 1);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+    if (!top) throw new Error('Keine Tasten in der Matrix erkannt');
+    profile.defaultSwitch = JSON.parse(top[0]);
+    profile.switches = Object.fromEntries(Object.entries(perKey).filter(([, s]) => JSON.stringify(s) !== top[0]));
+
+    const d = profile.defaultSwitch;
+    log('info', `Gelesen: ${Object.keys(perKey).length} Tasten, Standard Auslösepunkt ${d.actuation} mm, ` +
+      `RT ${d.rapidTrigger ? `an (${d.rtPress}/${d.rtRelease} mm)` : 'aus'}, Totzone ${d.deadzoneTop}/${d.deadzoneBottom} mm, ` +
+      `${Object.keys(profile.switches).length} Tasten abweichend: ${Object.keys(profile.switches).slice(0, 8).join(', ')}`);
+    // Leere Plätze (00 00 00 00) sind Lücken in der Matrix; nur belegte, aber unbekannte Einträge melden.
+    const unknown = slots.flatMap((k, i) => {
+      const entry = matrix.subarray(i * 4, i * 4 + 4);
+      return !k && entry.some((b) => b) ? [`${i}: ${toHex(entry, 4)}`] : [];
+    });
+    if (unknown.length) log('info', `Belegte Plätze ohne bekannte Taste: ${unknown.join(' | ')}`);
   }
 
   async writeSection(section: ConfigSection, config: DeviceConfig): Promise<void> {

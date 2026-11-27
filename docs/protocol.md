@@ -205,7 +205,21 @@ SET 08 00 00 00 07 fa ff fa fd   Ausschalten (= Ursprungszustand)
 - Empfänger: Direkt nach einem Moduswechsel antwortet die Tastatur langsamer als GearHubs 5 × 100 ms Wartezeit;
   die App wartet bis ca. 2,5 s.
 
+## Tastenmatrix & Magnetschalter lesen (2026-11-27, per Kabel geprüft)
+
+Beide Antworten sind **reine Daten ohne Befehls-Echo**; je Seite 64 Byte, Seiten werden aneinandergehängt.
+
+- **Matrix** `8a <Profil> ff <Seite> <Fn-Ebene>`, 8 Seiten = 128 Plätze × 4 Byte.
+  Normale Taste `00 00 <HID> 00`, Fn `0a 01 00 00` (Platz 65), leerer Platz `00 00 00 00`.
+  Reihenfolge ist **spaltenweise**: 0 Esc, 1 ^, 2 Tab, 3 Caps, 4 Shift, 5 Strg, 6 F1, 7 1, 8 Q, 9 A, 10 ISO <, 11 Win …
+  Plätze 96–98: `13 01 00/01/03` (vermutlich Drehknopf). 82 Tasten erkannt.
+- **Magnet** `e5 <Art> 01 <Seite>`: u16 LE je Platz (4 Seiten) bzw. 1 Byte je Platz (Art 7 und fb, 2 Seiten).
+  Art 0 Auslösepunkt, 1 Rückstellpunkt (noch nicht gelesen), 2/3 RT Drücken/Loslassen, 6 Totzone unten,
+  7 Tastenmodus (Bit 7 = RT), fb Totzone oben.
+- **Faktor 100 = 1 mm** (Firmware 0x0403), bestätigt: Rohwert `c8` = 200 → GearHub zeigt 2,00 mm.
+- Werkszustand: Auslösepunkt 2,00 mm, RT aus, RT 0,30/0,30 mm, Totzone unten 0,30 mm, oben 0.
+
 ## Offen / nächste Mitschnitte
 
-1. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).
-3. Tastenbelegung (`8a`/`0a`), Auslösepunkt/RT (`e5`/`65`).
+1. Auslösepunkt/RT schreiben (`65`), Rückstellpunkt (Art 1), Continuous RT.
+2. Tastenbelegung schreiben (`0a`).

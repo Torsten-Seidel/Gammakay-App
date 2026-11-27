@@ -36,6 +36,8 @@ export const CMD = {
   GET_SLEEP: 0x91,
   GET_REPORT_RATE: 0x83,
   SET_SLEEP: 0x11,
+  GET_KEYMATRIX: 0x8a,
+  GET_MULTI_MAGNETISM: 0xe5,
   SET_REPORT_RATE: 0x03,
   SET_LED: 0x07,
   SET_SIDE_LED: 0x08,
@@ -263,6 +265,78 @@ export function reportRatePacket(rate: number): Uint8Array {
   const index = POLLING_RATES.indexOf(rate);
   if (index < 0) throw new Error(`Polling-Rate ${rate} Hz wird nicht unterstützt`);
   return makePacket([CMD.SET_REPORT_RATE, 0, index], 7);
+}
+
+// ---------- Tastenmatrix & Magnetschalter (nur Lesen) ----------
+
+/** 128 Matrix-Plätze; jeder Platz 4 Byte in der Tastenmatrix, 2 Byte (LE) je Wert bei den Magnet-Daten. */
+export const MATRIX_SLOTS = 128;
+/** Rohwert ↔ mm: Firmware 0x0403 → GearHub-Faktor 100 (0,01 mm). */
+export const TRAVEL_STEP = 100;
+
+/** `8A <Profil> FF <Seite> <Fn-Ebene>` – 8 Seiten à 64 Byte = 128 × 4 Byte (GearHub _getKeyMatrix). */
+export function keyMatrixReadPacket(profile: number, page: number, fnLayer = 0): Uint8Array {
+  return makePacket([CMD.GET_KEYMATRIX, profile, 0xff, page, fnLayer], 7);
+}
+
+/**
+ * `E5 <Art> 01 <Seite>` (GearHub _getMulitMagnetismCMD). Arten: 0 Auslösepunkt, 1 Rückstellpunkt,
+ * 2/3 Rapid Trigger Drücken/Loslassen, 6 untere Totzone, 7 Tastenmodus (1 Byte/Taste), 251 obere Totzone (1 Byte/Taste).
+ */
+export function magnetismReadPacket(kind: number, page: number): Uint8Array {
+  return makePacket([CMD.GET_MULTI_MAGNETISM, kind, 1, page], 7);
+}
+
+export const MAGNETISM = {
+  travel: 0,
+  release: 1,
+  rtPress: 2,
+  rtRelease: 3,
+  deadzoneBottom: 6,
+  modes: 7,
+  deadzoneTop: 251,
+} as const;
+
+export function decodeU16List(bytes: ArrayLike<number>): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 1 < bytes.length; i += 2) out.push(bytes[i] | (bytes[i + 1] << 8));
+  return out;
+}
+
+/** Tastenmodus-Byte: Bit 7 = Rapid Trigger, Rest = Modus (0 normal, 2 DKS, 3 MT, 4/5 Toggle, 7 Snap Tap). */
+export function decodeKeyMode(b: number): { mode: number; rapidTrigger: boolean } {
+  return { mode: b & 0x7f, rapidTrigger: (b & 0x80) !== 0 };
+}
+
+/** HID-Usage (Tastatur-Seite) → KeyboardEvent.code, wie die App Tasten benennt. */
+const HID_TO_CODE: Record<number, string> = (() => {
+  const m: Record<number, string> = {};
+  for (let i = 0; i < 26; i++) m[4 + i] = `Key${String.fromCharCode(65 + i)}`;
+  for (let i = 0; i < 9; i++) m[30 + i] = `Digit${i + 1}`;
+  m[39] = 'Digit0';
+  for (let i = 0; i < 12; i++) m[58 + i] = `F${i + 1}`;
+  Object.assign(m, {
+    40: 'Enter', 41: 'Escape', 42: 'Backspace', 43: 'Tab', 44: 'Space', 45: 'Minus', 46: 'Equal',
+    47: 'BracketLeft', 48: 'BracketRight', 49: 'Backslash', 50: 'Backslash', 51: 'Semicolon', 52: 'Quote',
+    53: 'Backquote', 54: 'Comma', 55: 'Period', 56: 'Slash', 57: 'CapsLock', 70: 'PrintScreen', 71: 'ScrollLock',
+    72: 'Pause', 73: 'Insert', 74: 'Home', 75: 'PageUp', 76: 'Delete', 77: 'End', 78: 'PageDown', 79: 'ArrowRight',
+    80: 'ArrowLeft', 81: 'ArrowDown', 82: 'ArrowUp', 100: 'IntlBackslash', 101: 'ContextMenu',
+    224: 'ControlLeft', 225: 'ShiftLeft', 226: 'AltLeft', 227: 'MetaLeft', 228: 'ControlRight', 229: 'ShiftRight',
+    230: 'AltRight', 231: 'MetaRight',
+  });
+  return m;
+})();
+
+/** Matrix (512 Byte) → Taste je Platz. Normale Taste: `00 00 <HID> 00`; Fn: `0A 01 00 00`. */
+export function decodeKeyMatrix(bytes: ArrayLike<number>): (string | undefined)[] {
+  const slots: (string | undefined)[] = [];
+  for (let i = 0; i < MATRIX_SLOTS; i++) {
+    const [t, a, code, b] = [bytes[i * 4], bytes[i * 4 + 1], bytes[i * 4 + 2], bytes[i * 4 + 3]];
+    if (t === 10 && a === 1 && code === 0 && b === 0) slots.push('Fn');
+    else if (t === 0 && a === 0 && b === 0 && code) slots.push(HID_TO_CODE[code]);
+    else slots.push(undefined);
+  }
+  return slots;
 }
 
 // ---------- Energiesparen ----------

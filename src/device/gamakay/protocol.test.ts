@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
   decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
 } from './protocol.ts';
@@ -142,4 +143,27 @@ test('Energiespar-Zeiten und Geräteinfo werden dekodiert', () => {
     { backlightBt: 120, backlight24g: 120, deepBt: 1680, deep24g: 1680 });
   const info = bytes('ad 02 01 ff ff 01 00 00 07 0e 00 00 00 52 59 35 30 36 30 52 59 35 30 00 00');
   assert.equal(decodeInfoName(info), 'RY5060RY50');
+});
+
+test('Magnet-Lesepaket: E5 <Art> 01 <Seite> mit Prüfsumme in Byte 7', () => {
+  const p = magnetismReadPacket(0, 2);
+  assert.deepEqual([...p.subarray(0, 8)], [0xe5, 0, 1, 2, 0, 0, 0, 0xff - ((0xe5 + 1 + 2) & 0xff)]);
+});
+
+test('Tastenmatrix: HID-Codes und Fn erkennen', () => {
+  const m = new Uint8Array(512);
+  m.set([0, 0, 41, 0], 0); // Esc
+  m.set([0, 0, 4, 0], 8 * 4); // A
+  m.set([10, 1, 0, 0], 75 * 4); // Fn
+  const slots = decodeKeyMatrix(m);
+  assert.equal(slots[0], 'Escape');
+  assert.equal(slots[8], 'KeyA');
+  assert.equal(slots[75], 'Fn');
+  assert.equal(slots[9], undefined);
+});
+
+test('Magnetwerte u16 LE und Modusbyte', () => {
+  assert.deepEqual(decodeU16List([120, 0, 0x2c, 0x01]), [120, 300]);
+  assert.deepEqual(decodeKeyMode(0x80), { mode: 0, rapidTrigger: true });
+  assert.deepEqual(decodeKeyMode(0x02), { mode: 2, rapidTrigger: false });
 });

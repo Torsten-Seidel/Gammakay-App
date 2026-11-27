@@ -23,6 +23,8 @@ export interface Transport {
   /** Lesebefehl senden; Antwort im USB-Format (Byte 0 = Befehl). */
   query(cmd: number): Promise<Uint8Array>;
   write(packet: Uint8Array): Promise<void>;
+  /** Fertiges Lesepaket senden und die Antwort ungeprüft zurückgeben (Antworten ohne Befehls-Echo, z. B. `8A`/`E5`). */
+  queryRaw(packet: Uint8Array): Promise<Uint8Array>;
   /** Akkustand in Prozent; null = nicht verfügbar (Kabel) oder keine Antwort (z. B. Ruhezustand). */
   readBattery(): Promise<number | null>;
 }
@@ -73,6 +75,16 @@ export class GamakayTransport extends QueuedTransport implements Transport {
     return this.enqueue(async () => {
       await this.send(packet);
       await sleep(40);
+    });
+  }
+
+  queryRaw(packet: Uint8Array): Promise<Uint8Array> {
+    return this.enqueue(async () => {
+      await this.send(packet);
+      await sleep(RESPONSE_DELAY_MS);
+      const res = toBytes(await this.device.receiveFeatureReport(0));
+      log('in', `GET_FEATURE ${toHex(res, 24)}`);
+      return res;
     });
   }
 
@@ -142,6 +154,17 @@ export class DongleTransport extends QueuedTransport implements Transport {
       const res = await this.receive();
       if (res[0] !== cmd) throw new Error(`Keine passende Antwort auf Befehl 0x${cmd.toString(16)} (Empfänger)`);
       return res;
+    });
+  }
+
+  queryRaw(packet: Uint8Array): Promise<Uint8Array> {
+    return this.enqueue(async () => {
+      await this.sendToKeyboard(packet);
+      await this.waitFor('canRead');
+      await sleep(DONGLE_GAP_MS);
+      await this.sendRaw([DONGLE_NOTICE_READ]);
+      await sleep(DONGLE_GAP_MS);
+      return this.receive();
     });
   }
 
@@ -217,6 +240,12 @@ export class BtTransport extends QueuedTransport implements Transport {
     const res = await this.request([BT_DATA_PREFIX, ...readPacket(cmd)], (d) => d[0] === BT_DATA_PREFIX && d[1] === cmd);
     if (!res) throw new Error(`Keine Antwort auf Befehl 0x${cmd.toString(16)} (Bluetooth)`);
     return res.slice(1); // ohne Präfix = USB-Format
+  }
+
+  async queryRaw(packet: Uint8Array): Promise<Uint8Array> {
+    const res = await this.request([BT_DATA_PREFIX, ...packet], (d) => d[0] === BT_DATA_PREFIX);
+    if (!res) throw new Error(`Keine Antwort auf Befehl 0x${packet[0].toString(16)} (Bluetooth)`);
+    return res.slice(1);
   }
 
   write(packet: Uint8Array): Promise<void> {
