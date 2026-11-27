@@ -67,8 +67,24 @@ export class GamakayHidDriver implements KeyboardDriver {
   /** Bereits freigegebenes Gerät verwenden, sonst die Geräteauswahl (nur TK75-Konfig-Interface) öffnen. */
   static async connect(): Promise<GamakayHidDriver> {
     if (!('hid' in navigator)) throw new Error('WebHID ist hier nicht verfügbar (nur Chromium/Electron).');
-    let device = (await navigator.hid.getDevices()).find(isConfigInterface);
-    if (!device) {
+    // Alle freigegebenen Wege probieren (Kabel → Bluetooth → Empfänger) und den ersten nehmen, der antwortet.
+    // Sonst bliebe z. B. der eingesteckte Empfänger hängen, obwohl die Tastatur auf Bluetooth steht.
+    const rank = (d: HIDDevice) => (isUsbConfig(d) ? 0 : isBtConfig(d) ? 1 : 2);
+    const known = (await navigator.hid.getDevices()).filter(isConfigInterface).sort((a, b) => rank(a) - rank(b));
+    for (const candidate of known) {
+      const driver = new GamakayHidDriver(candidate);
+      try {
+        await driver.transport.open();
+        await driver.transport.query(CMD.GET_VERSION);
+        log('info', `Verbunden: ${driver.info.name} (${TRANSPORT_LABEL[driver.info.transport]})`);
+        return driver;
+      } catch (e) {
+        log('info', `${TRANSPORT_LABEL[driver.info.transport]}: keine Antwort – nächster Weg (${String(e)})`);
+        await driver.transport.close().catch(() => undefined);
+      }
+    }
+    let device: HIDDevice | undefined;
+    {
       const picked = await navigator.hid.requestDevice({
         filters: [
           { vendorId: TK75_VENDOR_ID, productId: TK75_PRODUCT_ID, usagePage: CONFIG_USAGE_PAGE, usage: CONFIG_USAGE },
