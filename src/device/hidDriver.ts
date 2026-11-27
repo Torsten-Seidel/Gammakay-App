@@ -8,7 +8,7 @@ import {
   CMD, COLOR_MODE_RAINBOW, CONFIG_USAGE, CONFIG_USAGE_PAGE, LED_EFFECTS, SIDE_LED_EFFECTS, SIDE_SPEED_MAX,
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
-  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, fnMatrixReadPacket, fnMatrixWritePacket, type MatrixLayer, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
 import { BtTransport, DongleTransport, GamakayTransport, type Transport } from './gamakay/transport';
@@ -36,8 +36,9 @@ const isConfigInterface = (d: HIDDevice) => isUsbConfig(d) || isBtConfig(d) || i
 type SwitchChange = { key: string; to: SwitchConfig; packets: Uint8Array[] };
 /** Bis zu so vielen geänderten Tasten wird einzeln geschrieben, darüber als Sammelschreiben (ganze Tabellen). */
 const MAX_SWITCH_KEYS = 5;
-/** Befehle beim Lesen: Schalterdaten (8 Matrix + 2 Modus + 5×4 Wege + 2 Totzone oben) und alles zusammen (+ 6 Basis) */
-const SWITCH_READ_OPS = 32;
+/** Befehle beim Lesen: Belegung (8 Basis + 8 Fn) + Schalterdaten (2 Modus + 5×4 Wege + 2 Totzone oben), alles (+ 6 Basis) */
+const KEYMAP_READ_OPS = 16;
+const SWITCH_READ_OPS = KEYMAP_READ_OPS + 24;
 const READ_OPS = 6 + SWITCH_READ_OPS;
 const SECTION_LABEL: Partial<Record<ConfigSection, string>> = {
   lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter', keymap: 'Tastenbelegung',
@@ -125,8 +126,8 @@ export class GamakayHidDriver implements KeyboardDriver {
   /** Taste → Matrix-Platz und zuletzt gelesene/geschriebene Schalterwerte (Grundlage fürs Schreiben) */
   private keySlots: Record<string, number> = {};
   /** Zuletzt gelesene Basis-Belegung je Platz (4 Byte) und daraus gelesene Aktion je Taste (Vergleichsstand). */
-  private keymapRaw: number[][] = [];
-  private keymapRead: Record<string, KeyAction> = {};
+  private keymapRaw: Record<MatrixLayer, number[][]> = { base: [], fn: [] };
+  private keymapRead: Record<MatrixLayer, Record<string, KeyAction>> = { base: {}, fn: {} };
   private switchState: Record<string, KeySwitchValues> = {};
   /** Zuletzt gelesene Rohtabellen aller 128 Plätze (Grundlage fürs Sammelschreiben). */
   private switchTables: SwitchTables | null = null;
@@ -275,21 +276,28 @@ export class GamakayHidDriver implements KeyboardDriver {
    */
   private async readKeymap(profile: Profile): Promise<void> {
     this.progress('Lese Tastenbelegung …');
-    const matrix = await this.readPages((p) => keyMatrixReadPacket(0, p), 8, 'Matrix');
-    this.keymapRaw = Array.from({ length: 128 }, (_, i) => Array.from(matrix.subarray(i * 4, i * 4 + 4)));
-    this.keymapRead = {};
-    const base: Record<string, KeyAction> = {};
-    const unknown: string[] = [];
-    TK75_SLOTS.forEach((key, slot) => {
-      if (!key) return;
-      const action = decodeKeyAction(this.keymapRaw[slot], slot) as KeyAction | null;
-      if (!action) unknown.push(`${key}: ${toHex(Uint8Array.from(this.keymapRaw[slot]), 4)}`);
-      this.keymapRead[key] = action ?? { kind: 'default' };
-      if (action && action.kind !== 'default') base[key] = action;
-    });
-    profile.keymap = { ...profile.keymap, base };
-    log('info', `Gelesen: Tastenbelegung, ${Object.keys(base).length} Tasten umbelegt${Object.keys(base).length ? `: ${Object.keys(base).join(', ')}` : ''}`);
-    if (unknown.length) log('info', `Unbekannte Belegungen (bleiben unverändert): ${unknown.join(' | ')}`);
+    const pages: Record<MatrixLayer, (p: number) => Uint8Array> = {
+      base: (p) => keyMatrixReadPacket(0, p),
+      fn: (p) => fnMatrixReadPacket(0, p), // Fn-Ebene für Windows (System 0)
+    };
+    for (const layer of ['base', 'fn'] as const) {
+      const matrix = await this.readPages(pages[layer], 8, layer === 'base' ? 'Matrix' : 'Fn-Matrix');
+      this.keymapRaw[layer] = Array.from({ length: 128 }, (_, i) => Array.from(matrix.subarray(i * 4, i * 4 + 4)));
+      this.keymapRead[layer] = {};
+      const actions: Record<string, KeyAction> = {};
+      const unknown: string[] = [];
+      TK75_SLOTS.forEach((key, slot) => {
+        if (!key) return;
+        const action = decodeKeyAction(this.keymapRaw[layer][slot], slot, layer) as KeyAction | null;
+        if (!action) unknown.push(`${key}: ${toHex(Uint8Array.from(this.keymapRaw[layer][slot]), 4)}`);
+        this.keymapRead[layer][key] = action ?? { kind: 'default' };
+        if (action && action.kind !== 'default') actions[key] = action;
+      });
+      profile.keymap = { ...profile.keymap, [layer]: actions };
+      const n = Object.keys(actions).length;
+      log('info', `Gelesen: Belegung ${layer === 'base' ? 'Basis' : 'Fn'}, ${n} Tasten umbelegt${n ? `: ${Object.keys(actions).join(', ')}` : ''}`);
+      if (unknown.length) log('info', `Unbekannte Belegungen ${layer} (bleiben unverändert): ${unknown.join(' | ')}`);
+    }
   }
 
   /** Tastenbelegung + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
@@ -349,24 +357,27 @@ export class GamakayHidDriver implements KeyboardDriver {
       `${Object.keys(profile.switches).length} Tasten abweichend: ${Object.keys(profile.switches).slice(0, 8).join(', ')}`);
   }
 
-  /** Basis-Belegung schreiben: nur Tasten, deren Aktion sich gegenüber dem gelesenen Stand geändert hat (wie GearHub einzeln). */
+  /**
+   * Belegung schreiben (Basis + Fn-Ebene für Windows): nur Tasten, deren Aktion sich gegenüber dem gelesenen Stand
+   * geändert hat, einzeln wie GearHub.
+   */
   private async writeKeymap(profile: Profile): Promise<void> {
-    if (!this.keymapRaw.length) throw new Error('Tastenbelegung wurde noch nicht gelesen.');
-    if (Object.keys(profile.keymap.fn).length) throw new Error('Die Fn-Ebene kann noch nicht geschrieben werden.');
-    const changes = TK75_SLOTS.flatMap((key, slot) => {
+    if (!this.keymapRaw.base.length || !this.keymapRaw.fn.length) throw new Error('Tastenbelegung wurde noch nicht gelesen.');
+    const changes = (['base', 'fn'] as const).flatMap((layer) => TK75_SLOTS.flatMap((key, slot) => {
       if (!key) return [];
-      const to = actionFor(profile, 'base', key);
-      if (JSON.stringify(to) === JSON.stringify(this.keymapRead[key] ?? { kind: 'default' })) return [];
+      const to = actionFor(profile, layer, key);
+      if (JSON.stringify(to) === JSON.stringify(this.keymapRead[layer][key] ?? { kind: 'default' })) return [];
       if (key === 'Fn') throw new Error('Die Fn-Taste kann nicht umbelegt werden (sonst ist die Fn-Ebene nicht mehr erreichbar).');
-      const entry = encodeKeyAction(to, slot);
-      return [{ key, slot, to, entry }];
-    });
+      const entry = encodeKeyAction(to, slot, layer);
+      return [{ layer, key, slot, to, entry }];
+    }));
     if (!changes.length) return;
-    this.addOps(changes.length + 8);
-    for (const [n, { key, slot, to, entry }] of changes.entries()) {
-      this.progress(`Belege ${key} (${n + 1}/${changes.length}) …`);
-      log('info', `Belege ${key} (Platz ${slot}): ${JSON.stringify(to)} → ${toHex(Uint8Array.from(entry), 4)}`);
-      await this.transport.write(keyMatrixWritePacket(0, slot, entry));
+    this.addOps(changes.length + KEYMAP_READ_OPS);
+    for (const [n, { layer, key, slot, to, entry }] of changes.entries()) {
+      const name = layer === 'fn' ? `Fn+${key}` : key;
+      this.progress(`Belege ${name} (${n + 1}/${changes.length}) …`);
+      log('info', `Belege ${name} (Platz ${slot}): ${JSON.stringify(to)} → ${toHex(Uint8Array.from(entry), 4)}`);
+      await this.transport.write(layer === 'fn' ? fnMatrixWritePacket(0, slot, entry) : keyMatrixWritePacket(0, slot, entry));
       await sleep(KEY_WRITE_GAP_MS); // GearHub: vendorSleep (100 ms) nach jeder Taste
     }
     await sleep(500);
@@ -378,7 +389,8 @@ export class GamakayHidDriver implements KeyboardDriver {
     } finally {
       this.stepLabel = null;
     }
-    const lost = changes.filter(({ key, to }) => JSON.stringify(actionFor(check, 'base', key)) !== JSON.stringify(to)).map((c) => c.key);
+    const lost = changes.filter(({ layer, key, to }) => JSON.stringify(actionFor(check, layer, key)) !== JSON.stringify(to))
+      .map((c) => (c.layer === 'fn' ? `Fn+${c.key}` : c.key));
     if (lost.length) throw new Error(`Belegung nicht übernommen: ${lost.join(', ')} – bitte erneut „Übernehmen“.`);
   }
 

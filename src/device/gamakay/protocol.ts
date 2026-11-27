@@ -38,6 +38,8 @@ export const CMD = {
   SET_SLEEP: 0x11,
   GET_KEYMATRIX: 0x8a,
   SET_KEYMATRIX: 0x0a,
+  GET_FN: 0x90,
+  SET_FN: 0x10,
   GET_MULTI_MAGNETISM: 0xe5,
   SET_MULTI_MAGNETISM: 0x65,
   SET_REPORT_RATE: 0x03,
@@ -373,6 +375,29 @@ export const TK75_DEFAULT_MATRIX: readonly (readonly number[])[] = (() => {
   return m;
 })();
 
+/**
+ * Werks-Fn-Ebene (Windows, System 0), gelesen am 2026-11-27. Leere Plätze = auf der Fn-Ebene unbelegt.
+ * Enthält u. a. Fn+Esc = Reset (`0a 02`) – die App bietet Reset nicht als Funktion an.
+ */
+export const TK75_DEFAULT_FN_MATRIX: readonly (readonly number[])[] = (() => {
+  const m: number[][] = Array.from({ length: MATRIX_SLOTS }, () => [0, 0, 0, 0]);
+  const raw =
+    '0:10,2,0,0 6:3,0,131,1 7:14,0,0,0 11:10,3,0,0 12:3,0,234,0 13:14,0,1,0 16:8,0,4,0 18:3,0,233,0 19:14,0,2,0 ' +
+    '22:8,0,4,1 24:3,0,226,0 25:14,0,5,0 28:8,0,4,2 30:3,0,182,0 31:14,0,6,0 36:3,0,181,0 38:0,0,70,0 39:0,0,72,0 ' +
+    '41:10,8,0,0 42:3,0,205,0 44:0,0,71,0 45:0,0,73,0 46:0,0,77,0 48:3,0,183,0 54:3,0,138,1 60:3,0,35,2 66:3,0,148,1 ' +
+    '72:3,0,146,1 77:13,3,2,0 78:19,2,0,0 79:13,5,1,0 80:10,12,0,0 81:13,1,0,0 82:13,2,1,0 83:13,2,2,0 85:10,24,0,0 ' +
+    '89:13,3,1,0 92:19,3,0,0 98:19,3,0,0';
+  for (const pair of raw.split(' ')) {
+    const [slot, bytes] = pair.split(':');
+    m[Number(slot)] = bytes.split(',').map(Number);
+  }
+  return m;
+})();
+
+export type MatrixLayer = 'base' | 'fn';
+const defaultEntry = (slot: number, layer: MatrixLayer) =>
+  (layer === 'fn' ? TK75_DEFAULT_FN_MATRIX : TK75_DEFAULT_MATRIX)[slot];
+
 /** Platz → physische Taste (fest, aus der Werks-Matrix). */
 export const TK75_SLOTS: readonly (string | undefined)[] = decodeKeyMatrix(TK75_DEFAULT_MATRIX.flat());
 
@@ -409,15 +434,15 @@ export const FUNCTION_CODES: Record<string, readonly number[]> = {
   'sys.winLock': [10, 3, 0, 0],
 };
 
-/** Belegung eines Platzes (Modell) → 4 Byte. `default` = Werksbelegung dieses Platzes. */
-export function encodeKeyAction(action: KeyActionLike, slot: number): number[] {
+/** Belegung eines Platzes (Modell) → 4 Byte. `default` = Werksbelegung dieses Platzes auf dieser Ebene. */
+export function encodeKeyAction(action: KeyActionLike, slot: number, layer: MatrixLayer = 'base'): number[] {
   const hid = (code: string) => {
     const h = CODE_TO_HID[code];
     if (h === undefined) throw new Error(`Taste ${code} ist auf der TK75 nicht belegbar`);
     return h;
   };
   switch (action.kind) {
-    case 'default': return [...TK75_DEFAULT_MATRIX[slot]];
+    case 'default': return [...defaultEntry(slot, layer)];
     case 'disabled': return [0, 0, 0, 0];
     case 'key': return action.code === 'Fn' ? [10, 1, 0, 0] : [0, 0, hid(action.code), 0];
     case 'combo': {
@@ -435,10 +460,10 @@ export function encodeKeyAction(action: KeyActionLike, slot: number): number[] {
 }
 
 /** 4 Byte → Belegung (Modell). `null` = unbekannt (wird nicht angezeigt und nicht überschrieben). */
-export function decodeKeyAction(entry: ArrayLike<number>, slot: number): KeyActionLike | null {
+export function decodeKeyAction(entry: ArrayLike<number>, slot: number, layer: MatrixLayer = 'base'): KeyActionLike | null {
   const e = Array.from(entry).slice(0, 4);
   const same = (a: readonly number[]) => a.every((b, i) => b === e[i]);
-  if (same(TK75_DEFAULT_MATRIX[slot])) return { kind: 'default' };
+  if (same(defaultEntry(slot, layer))) return { kind: 'default' };
   if (same([0, 0, 0, 0])) return { kind: 'disabled' };
   if (same([10, 1, 0, 0])) return { kind: 'key', code: 'Fn' };
   const fn = Object.entries(FUNCTION_CODES).find(([, v]) => same(v));
@@ -464,6 +489,18 @@ export function keyMatrixWritePacket(profile: number, slot: number, entry: numbe
   if (slot < 0 || slot >= MATRIX_SLOTS) throw new Error(`Ungültiger Platz ${slot}`);
   if (entry.length !== 4) throw new Error('Eine Belegung hat 4 Byte');
   return makePacket([CMD.SET_KEYMATRIX, profile, slot, 0, 0, 1, layer], 7, entry);
+}
+
+/** Fn-Ebene lesen: `90 <System> <Profil> ff <Seite>`, 8 Seiten (GearHub _getFnKeyMatrix). System 0 = Windows, 1 = Mac. */
+export function fnMatrixReadPacket(profile: number, page: number, system = 0): Uint8Array {
+  return makePacket([CMD.GET_FN, system, profile, 0xff, page], 7);
+}
+
+/** Fn-Ebene schreiben: `10 <System> <Profil> <Platz> 00 00 00 <Prüfsumme>` + 4 Byte (GearHub setFnKeyConfigSimple). */
+export function fnMatrixWritePacket(profile: number, slot: number, entry: number[], system = 0): Uint8Array {
+  if (slot < 0 || slot >= MATRIX_SLOTS) throw new Error(`Ungültiger Platz ${slot}`);
+  if (entry.length !== 4) throw new Error('Eine Belegung hat 4 Byte');
+  return makePacket([CMD.SET_FN, system, profile, slot], 7, entry);
 }
 
 /** Schalterwerte einer Taste in mm (strukturgleich mit SwitchConfig im Modell) + rohes Modusbyte. */

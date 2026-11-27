@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  encodeKeyAction, decodeKeyAction, keyMatrixWritePacket, TK75_SLOTS, TK75_DEFAULT_MATRIX,
+  encodeKeyAction, decodeKeyAction, fnMatrixReadPacket, fnMatrixWritePacket, TK75_DEFAULT_FN_MATRIX, keyMatrixWritePacket, TK75_SLOTS, TK75_DEFAULT_MATRIX,
   bulkSwitchPackets,
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
@@ -243,4 +243,18 @@ test('Tastenbelegung: Werkstabelle, Kodieren/Dekodieren, Schreibpaket', () => {
   // Paket: 0a 00 48 00 00 01 00 <chk> 00 00 29 00
   const p = keyMatrixWritePacket(0, 72, [0, 0, 41, 0]);
   assert.deepEqual([...p.subarray(0, 12)], [0x0a, 0, 72, 0, 0, 1, 0, 0xff - ((0x0a + 72 + 1) & 0xff), 0, 0, 41, 0]);
+});
+
+test('Fn-Ebene: Werkstabelle, Standard je Ebene, Pakete', () => {
+  assert.deepEqual([...TK75_DEFAULT_FN_MATRIX[0]], [10, 2, 0, 0]); // Fn+Esc = Reset (ab Werk)
+  assert.deepEqual(encodeKeyAction({ kind: 'default' }, 24, 'fn'), [3, 0, 226, 0]); // Fn+F4 = Stumm
+  assert.deepEqual(encodeKeyAction({ kind: 'default' }, 9, 'fn'), [0, 0, 0, 0]); // Fn+A unbelegt
+  assert.deepEqual(decodeKeyAction([3, 0, 226, 0], 24, 'fn'), { kind: 'default' });
+  assert.deepEqual(decodeKeyAction([3, 0, 226, 0], 24, 'base'), { kind: 'function', fn: 'media.mute' });
+  assert.deepEqual(decodeKeyAction([0, 0, 0, 0], 9, 'fn'), { kind: 'default' });
+  assert.deepEqual(decodeKeyAction([0, 0, 0, 0], 24, 'fn'), { kind: 'disabled' });
+  const r = fnMatrixReadPacket(0, 3);
+  assert.deepEqual([...r.subarray(0, 8)], [0x90, 0, 0, 0xff, 3, 0, 0, 0xff - ((0x90 + 0xff + 3) & 0xff)]);
+  const w = fnMatrixWritePacket(0, 9, [3, 0, 226, 0]);
+  assert.deepEqual([...w.subarray(0, 12)], [0x10, 0, 0, 9, 0, 0, 0, 0xff - ((0x10 + 9) & 0xff), 3, 0, 226, 0]);
 });

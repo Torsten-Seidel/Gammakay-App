@@ -271,6 +271,16 @@ danach vendorSleep 100 ms; die App wartet 150 ms und liest die Matrix zur Kontro
   ISO-#-Taste = HID 50 (`Backslash`). Drehknopf: Plätze 90–92 (`03 00 ea/e9/cd`) und 96–98 (`13 01 00/01/03`).
 - Geprüft: F12 → Stumm → F11 → Werk inkl. Kontroll-Lesen: Kabel ~2,0 s, Bluetooth ~2,3 s, Empfänger ~4,7 s.
 
+## Fn-Ebene (90 lesen, 10 schreiben, 2026-11-27, alle drei Wege geprüft)
+
+- Lesen `90 <System> <Profil> ff <Seite> 00 00 <Prüfsumme>`, 8 Seiten × 64 Byte (GearHub `_getFnKeyMatrix`).
+- Schreiben `10 <System> <Profil> <Platz> 00 00 00 <Prüfsumme>` + 4 Byte (GearHub `setFnKeyConfigSimple`), danach 150 ms.
+- System: 0 Windows, 1 Mac, 2 iOS, 3 Android (`_解码fnSys`). Die App liest/schreibt nur Windows (0); Mac ist anders belegt
+  (z. B. Launchpad `03 00 a0 02`, Siri `12 00 e3 2c`).
+- Werks-Fn (Windows, in `TK75_DEFAULT_FN_MATRIX`): Fn+Esc Reset `0a 02`, Fn+1/2/3 BT1–3 `0e 00 00–02`, Fn+4 2,4 GHz,
+  Fn+5 Kabel, Fn+Z/X/C (ISO: Y/X/C) Profil 1–3 `08 00 04 00–02`, Medien auf F1–F12, Licht auf den Pfeiltasten. Leere Plätze `00 00 00 00` = unbelegt.
+- Geprüft: Fn+A → Stumm → F11 → Werk (unbelegt) inkl. Kontroll-Lesen: Kabel ~2,3 s, Bluetooth ~2,2 s, Empfänger ~6 s.
+
 ## Offen / nächste Mitschnitte
 
-1. Fn-Ebene schreiben (GearHub `setFnKeyConfigSimple`), Makros (`09`), Drehknopf-Belegung.
+1. Makros (`09`), Drehknopf-Belegung, Werks-Fn-Belegungen in der Oberfläche beschriften.
