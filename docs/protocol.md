@@ -323,6 +323,30 @@ Die App macht das beim Übernehmen für jedes gelöschte Makro (geprüft über B
   50 Plätze (zeigt auch GearHub-Reste ohne Taste; Bluetooth: Verbinden gesamt ~2,2 s), beim Neu-Lesen nach
   „Übernehmen“ nur noch die Plätze mit Inhalt, die belegten und die eigenen. Neue Makros bekommen nur freie Plätze.
 
+## Erweiterte Tasten (aus dem GearHub-Treiber, `getMultiMagnetismInfo`/`setMultiMagnetismInfo`/`setSnapKeySimple`)
+
+Am Gerät geprüft (2026-11-28, Bluetooth, je ~3–4 s inkl. Kontroll-Lesen), danach alles auf Werk:
+- Mod-Tap F12 (`65 07 … 03`, `65 05 … 14`, Ebene 0 = Shift, Ebene 1 = A): tippen → „a“, halten + B → „B“.
+- Toggle „Halten“ F12 (Modus `04`, Ebene 0 = A): ein Druck → „aaaa…“, nächster Druck stoppt.
+- Snap Tap A/D (Modus `07`, Art 9 = Platz des Partners): A halten, D dazu, D los → „aaaa…“ läuft weiter (ohne Snap Tap stoppt es).
+- Wechselt eine Taste weg von Mod-Tap/Toggle, muss Ebene 0 wieder die normale Belegung bekommen (sonst bleibt z. B. „a“ auf F12)
+  und Ebene 1 geleert werden. Zurück auf normal = nur Modus `00`; Mod-Tap-Zeit und Snap-Partner bleiben stehen, wirken aber nicht.
+- Ebenen 1–3 sind ab Werk leer (`00 00 00 00`). Toggle „Dauerklick“ (`05`) noch nicht am Gerät probiert.
+- Mod-Tap F12 + Snap Tap A/D zusammen auch über Empfänger (~11,8 s, zurück ~8,8 s) und Kabel (~3,8 s) geprüft, gleiches Verhalten.
+
+- Tastenmodus = Art 7 (Bits 0–6; Bit 7 = RT): 0 normal, 2 DKS, 3 Mod-Tap, 4 Toggle „Halten“ (`tgl_hold`),
+  5 Toggle „Dauerklick“ (`tgl_dots`, GearHub „连点“), 7 Snap Tap. Gelesen am 2026-11-28: alle Tasten 0 (nur Plätze 126/127 = `ff`).
+- Zusatztabellen (gelesen/geschrieben wie die Schaltertabellen, `e5`/`65 <Art>`):
+  Art 4 = DKS-Auslösepunkt (u16, GearHub 0,5–2,5 mm, Standard 0,7), Art 10 = DKS-Phasen (8 Seiten = 4 × 128 Byte, Block g = Belegung g),
+  Art 5 = Mod-Tap-Zeit (1 Byte × 10 ms, Standard 200 ms), Art 9 = Snap-Tap-Partner (1 Byte = Matrix-Platz der anderen Taste).
+  Einzeln: DKS-Phasen `65 08 00 <Platz> <Ende>` + 4 Byte; Snap: beide Tasten Art 7 = 7, dann Art 9 gegenseitig (Ende auf dem letzten).
+- **Belegungen liegen in Matrix-Ebenen** (`8a <Profil> ff <Seite> <Ebene>`, `0a … <Ebene>` in Byte 6; GearHub `sonProfile` 0–3):
+  DKS-Belegung g = Ebene g (Ebene 0 = normale Belegung), Mod-Tap halten = Ebene 0, tippen = Ebene 1, Toggle = Ebene 0.
+  Belegungen sind Kombinationen `00 <HID1> <HID2> <HID3>` (bis 3 Tasten).
+- DKS-Phasenbyte je Belegung: 4 Phasen à 2 Bit (`p0 | p1<<2 | p2<<4 | p3<<6`), Werte 0–3. **Bedeutung der Werte offen**
+  (steht im nicht gespeicherten GearHub-Oberflächenteil) → Mitschnitt nötig.
+- Snap Tap hat auf der TK75 keine Modi (letzte gewinnt / neutral …), nur das Tastenpaar.
+
 ## Offen / nächste Mitschnitte
 
 1. Drehknopf-Plätze 96–98 (`13 01 00/01/03`) und Fn+Knopf (`13 03`, Display) entschlüsseln.

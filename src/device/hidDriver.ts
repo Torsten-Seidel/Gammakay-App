@@ -2,7 +2,7 @@ import type { KeyboardDriver } from './driver';
 import { TK75_CAPABILITIES } from './driver';
 import { log, toHex } from './log';
 import {
-  createDefaultConfig, switchFor, actionFor, type KeyAction, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Macro,
+  createDefaultConfig, switchFor, actionFor, type AdvancedKey, type KeyAction, type ConfigSection, type DeviceConfig, type DeviceSettings, type LightingConfig, type Macro,
   type MacroPlayback, type Profile, type SwitchConfig,
 } from './model';
 import {
@@ -10,6 +10,7 @@ import {
   TK75_PRODUCT_ID, TK75_VENDOR_ID, rawToSpeed, sideLedPacket, speedToRaw,
   BT_USAGE, BT_USAGE_PAGE, TK75_BT_PRODUCT_ID, TK75_DONGLE_PRODUCT_ID,
   MAGNETISM, PACKET_SIZE, keySwitchPackets, type KeySwitchValues, bulkSwitchPackets, mmToRaw, type SwitchTables, TRAVEL_STEP, decodeKeyMode, TK75_SLOTS, TK75_KEYMAP_SLOTS, decodeKeyAction, encodeKeyAction, keyMatrixWritePacket, fnMatrixReadPacket, fnMatrixWritePacket, type MatrixLayer, decodeU16List, keyMatrixReadPacket, magnetismReadPacket,
+  KEY_MODE, MT_TIME_MAX_MS, MT_TIME_STEP_MS, entryToKeyCode, keyCodeToEntry, magnetismKeyPacket,
   MACRO_MAX_READ_PAGES, MACRO_SLOTS, decodeMacro, decodeMacroBinding, encodeMacro, macroPageHasEnd, macroReadPacket, macroWritePackets,
   decodeInfoName, decodeLed, decodeReportRate, reportRatePacket, decodeSleep, decodeVersion, sleepPacket, ledPacket, type LedState,
 } from './gamakay/protocol';
@@ -43,7 +44,7 @@ const KEYMAP_READ_OPS = 16;
 const SWITCH_READ_OPS = KEYMAP_READ_OPS + 24;
 const READ_OPS = 6 + SWITCH_READ_OPS;
 const SECTION_LABEL: Partial<Record<ConfigSection, string>> = {
-  lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter', keymap: 'Tastenbelegung', macros: 'Makros',
+  lighting: 'Licht', settings: 'Geräteeinstellungen', switches: 'Schalter', keymap: 'Tastenbelegung', macros: 'Makros', advanced: 'Erweiterte Tasten',
 };
 /** Makronamen kennt die Tastatur nicht: Die App merkt sie sich je Speicherplatz (zugleich die Liste „eigener“ Plätze). */
 const MACRO_NAMES_KEY = 'tk75.macroNames';
@@ -86,7 +87,7 @@ const TRANSPORT_LABEL = { usb: 'USB', bt: 'Bluetooth', dongle: 'Empfänger 2,4 G
 export class GamakayHidDriver implements KeyboardDriver {
   readonly capabilities = TK75_CAPABILITIES;
   readonly supports = { read: true, write: true };
-  readonly writableSections: ConfigSection[] = ['lighting', 'settings', 'switches', 'keymap', 'macros'];
+  readonly writableSections: ConfigSection[] = ['lighting', 'settings', 'switches', 'keymap', 'macros', 'advanced'];
   readonly info: { name: string; transport: 'usb' | 'bt' | 'dongle'; vendorId: number; productId: number; firmware?: string };
   private readonly transport: Transport;
   /** Eigene Seitenlicht-Einstellung, solange die Akkuanzeige das Seitenlicht überlagert */
@@ -160,6 +161,12 @@ export class GamakayHidDriver implements KeyboardDriver {
   private switchState: Record<string, KeySwitchValues> = {};
   /** Zuletzt gelesene Rohtabellen aller 128 Plätze (Grundlage fürs Sammelschreiben). */
   private switchTables: SwitchTables | null = null;
+  /** Tastenmodus-Byte je Platz (zuletzt gelesen); Bits 0–6 = Modus (KEY_MODE), Bit 7 = RT */
+  private keyModes: number[] = [];
+  /** Erweiterte Tasten, wie zuletzt gelesen (Vergleichsstand) */
+  private advancedRead: AdvancedKey[] = [];
+  /** Matrix-Platz → ID der erweiterten Taste (stabil über Neu-Lesen) */
+  private advancedIds: Record<number, string> = {};
   /** Speicherplatz → Makro-ID (bleibt über Neu-Lesen stabil, damit die Auswahl in der Oberfläche erhalten bleibt) */
   private macroSlotIds: Record<number, string> = {};
   /** Wiedergabeart je Platz aus der zuletzt gelesenen Belegung (erste Taste mit diesem Makro) */
@@ -332,6 +339,11 @@ export class GamakayHidDriver implements KeyboardDriver {
       const unknown: string[] = [];
       TK75_KEYMAP_SLOTS.forEach((key, slot) => {
         if (!key) return;
+        // Erweiterte Taste: Ebene 0 gehört zur erweiterten Taste, nicht zur normalen Belegung.
+        if (layer === 'base' && this.isAdvancedSlot(slot)) {
+          this.keymapRead.base[key] = { kind: 'default' };
+          return;
+        }
         const raw = this.keymapRaw[layer][slot];
         const binding = decodeMacroBinding(raw);
         if (binding) this.macroModes[binding.slot] ??= binding.mode;
@@ -491,14 +503,183 @@ export class GamakayHidDriver implements KeyboardDriver {
     await this.writeKeymap(config.profiles[config.activeProfile], config);
   }
 
+  /** Platz mit erweiterter Taste (DKS, Mod-Tap, Toggle): Ebene 0 gehört dann nicht zur normalen Belegung. */
+  private isAdvancedSlot(slot: number): boolean {
+    const mode = (this.keyModes[slot] ?? 0) & 0x7f;
+    return mode === KEY_MODE.dks || mode === KEY_MODE.mt || mode === KEY_MODE.tglHold || mode === KEY_MODE.tglRepeat;
+  }
+
+  private advancedIdFor(slot: number): string {
+    return (this.advancedIds[slot] ??= `adv-${slot}`);
+  }
+
+  /**
+   * Erweiterte Tasten aus Tastenmodus, Zusatztabellen und Belegungsebenen (GearHub getMultiMagnetismInfo):
+   * Mod-Tap = halten Ebene 0 / tippen Ebene 1 + Zeit (Art 5), Toggle = Ebene 0, Snap Tap = Partner (Art 9).
+   * DKS wird noch nicht unterstützt und bleibt unverändert auf der Tastatur.
+   */
+  private async readAdvanced(profile: Profile): Promise<void> {
+    const modeAt = (slot: number) => (this.keyModes[slot] ?? 0) & 0x7f;
+    const used = (m: number) => this.keyModes.some((_, s) => TK75_SLOTS[s] && modeAt(s) === m);
+    const hasMt = used(KEY_MODE.mt);
+    const hasSnap = used(KEY_MODE.snap);
+    this.addOps((hasMt ? 2 + 8 : 0) + (hasSnap ? 2 : 0));
+    const mtTimes = hasMt ? await this.readPages((p) => magnetismReadPacket(MAGNETISM.mtTime, p), 2, 'Mod-Tap-Zeit') : null;
+    const tapLayer = hasMt ? await this.readPages((p) => keyMatrixReadPacket(0, p, 1), 8, 'Ebene 1') : null;
+    const partners = hasSnap ? await this.readPages((p) => magnetismReadPacket(MAGNETISM.snapPartner, p), 2, 'Snap-Partner') : null;
+
+    const adv: AdvancedKey[] = [];
+    const inSnap = new Set<number>();
+    for (let slot = 0; slot < 128; slot++) {
+      const key = TK75_SLOTS[slot];
+      if (!key || key === 'Fn') continue;
+      const base = this.keymapRaw.base[slot] ?? [0, 0, 0, 0];
+      const mode = modeAt(slot);
+      if (mode === KEY_MODE.mt && mtTimes && tapLayer) {
+        adv.push({
+          id: this.advancedIdFor(slot), kind: 'mt', key,
+          hold: entryToKeyCode(base, slot) ?? '',
+          tap: entryToKeyCode(tapLayer.subarray(slot * 4, slot * 4 + 4), slot) ?? '',
+          holdMs: mtTimes[slot] * MT_TIME_STEP_MS,
+        });
+      } else if (mode === KEY_MODE.tglHold || mode === KEY_MODE.tglRepeat) {
+        adv.push({
+          id: this.advancedIdFor(slot), kind: 'tgl', key, code: entryToKeyCode(base, slot) ?? '',
+          variant: mode === KEY_MODE.tglRepeat ? 'repeat' : 'hold',
+        });
+      } else if (mode === KEY_MODE.snap && partners && !inSnap.has(slot)) {
+        const other = partners[slot];
+        const otherKey = TK75_SLOTS[other];
+        if (!otherKey || other === slot) {
+          log('info', `Snap Tap auf ${key}: Partner-Platz ${other} unbekannt – bleibt unverändert`);
+          continue;
+        }
+        inSnap.add(slot).add(other);
+        adv.push({ id: this.advancedIdFor(slot), kind: 'snap', keys: [key, otherKey] });
+      } else if (mode === KEY_MODE.dks) {
+        log('info', `DKS auf ${key}: wird noch nicht unterstützt – bleibt unverändert`);
+      }
+    }
+    profile.advanced = adv;
+    this.advancedRead = structuredClone(adv);
+    if (adv.length) log('info', `Gelesen: erweiterte Tasten ${adv.map((a) => `${a.kind} ${a.kind === 'snap' ? a.keys.join('/') : a.key}`).join(', ')}`);
+  }
+
+  /** Erweiterte Tasten je Platz: Modus, Belegung Ebene 0/1, Mod-Tap-Zeit (10-ms-Schritte), Snap-Partner. */
+  private advancedSpecs(list: AdvancedKey[]) {
+    type Spec = { key: string; mode: number; l0?: number[]; l1?: number[]; mt?: number; partner?: number };
+    const specs = new Map<number, Spec>();
+    const slotOf = (key: string) => {
+      const slot = this.keySlots[key];
+      if (slot === undefined) throw new Error(`${key || 'Diese Taste'} kann keine erweiterte Taste sein.`);
+      return slot;
+    };
+    const put = (slot: number, spec: Spec) => {
+      if (specs.has(slot)) throw new Error(`${spec.key} hat mehr als eine erweiterte Funktion.`);
+      specs.set(slot, spec);
+    };
+    for (const a of list) {
+      if (a.kind === 'dks') throw new Error('DKS kann noch nicht auf die Tastatur geschrieben werden.');
+      if (a.kind === 'snap') {
+        const [s1, s2] = a.keys.map(slotOf);
+        if (s1 === s2) throw new Error('Snap Tap braucht zwei verschiedene Tasten.');
+        put(s1, { key: a.keys[0], mode: KEY_MODE.snap, partner: s2 });
+        put(s2, { key: a.keys[1], mode: KEY_MODE.snap, partner: s1 });
+        continue;
+      }
+      const slot = slotOf(a.key);
+      if (a.kind === 'mt') {
+        const ms = Math.min(MT_TIME_MAX_MS, Math.max(MT_TIME_STEP_MS, Math.round(a.holdMs / MT_TIME_STEP_MS) * MT_TIME_STEP_MS));
+        put(slot, { key: a.key, mode: KEY_MODE.mt, l0: keyCodeToEntry(a.hold, slot), l1: keyCodeToEntry(a.tap, slot), mt: ms / MT_TIME_STEP_MS });
+      } else {
+        put(slot, { key: a.key, mode: a.variant === 'repeat' ? KEY_MODE.tglRepeat : KEY_MODE.tglHold, l0: keyCodeToEntry(a.code, slot) });
+      }
+    }
+    return specs;
+  }
+
+  /**
+   * Erweiterte Tasten schreiben (wie GearHub setMagnetismInfoSimple/setSnapKeySimple): je geänderter Taste Modus (Art 7,
+   * RT-Bit bleibt), Mod-Tap-Zeit (Art 5) bzw. Snap-Partner (Art 9), dann die Belegungen in Ebene 0/1 (`0a … <Ebene>`).
+   * Entfernte Tasten: Modus normal, Ebene 0 = normale Belegung, Ebene 1 leer.
+   */
+  private async writeAdvanced(profile: Profile, config: DeviceConfig): Promise<void> {
+    if (!this.switchTables || !this.keymapRaw.base.length) throw new Error('Schalterwerte wurden noch nicht gelesen.');
+    const want = this.advancedSpecs(profile.advanced);
+    const had = this.advancedSpecs(this.advancedRead);
+    const macro = this.macroLookup(config);
+    for (const [slot, spec] of had) {
+      if (want.has(slot)) continue;
+      want.set(slot, {
+        key: spec.key, mode: KEY_MODE.normal,
+        l0: encodeKeyAction(actionFor(profile, 'base', spec.key), slot, 'base', macro),
+        l1: spec.l1 ? [0, 0, 0, 0] : undefined,
+      });
+    }
+    type Job = { key: string; slot: number; mag: [number, number[]][]; layers: [number, number[]][] };
+    const jobs: Job[] = [];
+    for (const [slot, to] of want) {
+      const from = had.get(slot);
+      const curMode = this.keyModes[slot] ?? 0;
+      const mag: [number, number[]][] = [];
+      if ((curMode & 0x7f) !== to.mode) mag.push([MAGNETISM.modes, [(curMode & 0x80) | to.mode]]);
+      if (to.mt !== undefined && to.mt !== from?.mt) mag.push([MAGNETISM.mtTime, [to.mt]]);
+      if (to.partner !== undefined && to.partner !== from?.partner) mag.push([MAGNETISM.snapPartner, [to.partner]]);
+      const layers: [number, number[]][] = [];
+      // Ebene 0 gehört nur bei Mod-Tap/Toggle zur erweiterten Taste; sonst gilt wieder die normale Belegung.
+      if (!to.l0 && from?.l0) to.l0 = encodeKeyAction(actionFor(profile, 'base', to.key), slot, 'base', macro);
+      if (to.l0 && !sameBytes(to.l0, this.keymapRaw.base[slot])) layers.push([0, to.l0]);
+      // Ebene 1 nur bei Mod-Tap belegt; wechselt die Taste weg von Mod-Tap, wird sie geleert.
+      const l1 = to.l1 ?? (from?.l1 ? [0, 0, 0, 0] : undefined);
+      if (l1 && !sameBytes(l1, from?.l1 ?? [0, 0, 0, 0])) layers.push([1, l1]);
+      if (mag.length || layers.length) jobs.push({ key: to.key, slot, mag, layers });
+      if (to.mode !== KEY_MODE.normal) {
+        const a = profile.advanced.find((x) => (x.kind === 'snap' ? x.keys : [x.key]).includes(to.key));
+        if (a) this.advancedIds[slot] = a.id;
+      } else delete this.advancedIds[slot];
+    }
+    if (!jobs.length) return;
+    this.addOps(jobs.reduce((n, j) => n + j.mag.length + j.layers.length, 0) + SWITCH_READ_OPS + 12);
+    for (const [n, { key, slot, mag, layers }] of jobs.entries()) {
+      this.progress(`Schreibe erweiterte Taste ${key} (${n + 1}/${jobs.length}) …`);
+      log('info', `Erweiterte Taste ${key} (Platz ${slot}): ${mag.map(([k, d]) => `Art ${k} = ${toHex(Uint8Array.from(d), 4)}`).join(', ')}` +
+        `${layers.length ? `; ${layers.map(([l, e]) => `Ebene ${l} = ${toHex(Uint8Array.from(e), 4)}`).join(', ')}` : ''}`);
+      for (const [i, [kind, data]] of mag.entries()) await this.transport.write(magnetismKeyPacket(kind, slot, i === mag.length - 1, data));
+      if (mag.length) await sleep(KEY_WRITE_GAP_MS);
+      for (const [layer, entry] of layers) {
+        await this.transport.write(keyMatrixWritePacket(0, slot, entry, layer));
+        await sleep(KEY_WRITE_GAP_MS);
+      }
+    }
+    await sleep(500);
+    this.progress('Prüfe, ob alles angekommen ist …');
+    const check = structuredClone(profile);
+    this.stepLabel = 'Prüfe, ob alles angekommen ist …';
+    try {
+      await this.readSwitches(check);
+    } finally {
+      this.stepLabel = null;
+    }
+    const got = this.advancedSpecs(check.advanced);
+    const lost = [...want].filter(([slot, s]) => {
+      const g = got.get(slot) ?? { key: s.key, mode: (this.keyModes[slot] ?? 0) & 0x7f };
+      return g.mode !== s.mode || (s.mt !== undefined && g.mt !== s.mt) || (s.partner !== undefined && g.partner !== s.partner) ||
+        (s.l0 !== undefined && !sameBytes(s.l0, this.keymapRaw.base[slot])) || (s.mode === KEY_MODE.mt && !sameBytes(s.l1 ?? [], g.l1 ?? []));
+    }).map(([, s]) => s.key);
+    if (lost.length) throw new Error(`Erweiterte Taste nicht übernommen: ${[...new Set(lost)].join(', ')} – bitte erneut „Übernehmen“.`);
+  }
+
   /** Tastenbelegung + Auslösepunkt, Rapid Trigger, Totzonen (E5) → Schalterwerte je Taste. */
   private async readSwitches(profile: Profile): Promise<void> {
+    // Tastenmodi zuerst: Bei erweiterten Tasten ist die Belegung (Ebene 0) Teil der erweiterten Taste.
+    this.progress('Lese Schalterwerte …');
+    const modes = await this.readPages((p) => magnetismReadPacket(MAGNETISM.modes, p), 2, 'Tastenmodus');
+    this.keyModes = Array.from(modes.subarray(0, 128));
     await this.readKeymap(profile);
     this.progress('Lese Schalterwerte …');
     const slots = TK75_SLOTS;
     const u16 = async (kind: number, label: string) =>
       decodeU16List(await this.readPages((p) => magnetismReadPacket(kind, p), 4, label));
-    const modes = await this.readPages((p) => magnetismReadPacket(MAGNETISM.modes, p), 2, 'Tastenmodus');
     const travel = await u16(MAGNETISM.travel, 'Auslösepunkt');
     const release = await u16(MAGNETISM.release, 'Rückstellpunkt');
     const rtPress = await u16(MAGNETISM.rtPress, 'RT Drücken');
@@ -542,6 +723,8 @@ export class GamakayHidDriver implements KeyboardDriver {
     profile.defaultSwitch = JSON.parse(top[0]);
     profile.switches = Object.fromEntries(Object.entries(perKey).filter(([, s]) => JSON.stringify(s) !== top[0]));
 
+    await this.readAdvanced(profile);
+
     const d = profile.defaultSwitch;
     log('info', `Gelesen: ${Object.keys(perKey).length} Tasten, Standard Auslösepunkt ${d.actuation} mm, Rückstellpunkt ${d.releasePoint} mm, ` +
       `RT ${d.rapidTrigger ? `an (${d.rtPress}/${d.rtRelease} mm)` : 'aus'}, Totzone ${d.deadzoneTop}/${d.deadzoneBottom} mm, ` +
@@ -558,6 +741,10 @@ export class GamakayHidDriver implements KeyboardDriver {
     const changes = (['base', 'fn'] as const).flatMap((layer) => TK75_KEYMAP_SLOTS.flatMap((key, slot) => {
       if (!key) return [];
       const to = actionFor(profile, layer, key);
+      if (layer === 'base' && this.isAdvancedSlot(slot)) {
+        if (to.kind === 'default') return [];
+        throw new Error(`${key} ist eine erweiterte Taste – die Belegung bitte unter „Erweiterte Tasten“ ändern.`);
+      }
       if (JSON.stringify(to) === JSON.stringify(this.keymapRead[layer][key] ?? { kind: 'default' })) {
         // Gleiches Makro, aber evtl. andere Wiedergabeart (steht in der Belegung) → Bytes vergleichen.
         if (to.kind !== 'macro' || !macro(to.macroId)) return [];
@@ -691,6 +878,7 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (section === 'switches') return this.writeSwitches(config.profiles[config.activeProfile]);
     if (section === 'keymap') return this.writeKeymap(config.profiles[config.activeProfile], config);
     if (section === 'macros') return this.writeMacros(config);
+    if (section === 'advanced') return this.writeAdvanced(config.profiles[config.activeProfile], config);
     if (section !== 'lighting') throw new Error(`Bereich "${section}" kann noch nicht geschrieben werden.`);
     if (!this.led || !this.side) throw new Error('Licht wurde noch nicht gelesen.');
     const wanted = config.profiles[config.activeProfile].lighting;

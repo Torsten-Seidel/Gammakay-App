@@ -7,6 +7,7 @@ import {
   keySwitchPackets,
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
+  entryToKeyCode, keyCodeToEntry, magnetismKeyPacket, MAGNETISM,
   encodeMacro, decodeMacro, macroWritePackets, macroReadPacket, macroBindingEntry, decodeMacroBinding,
   decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
 } from './protocol.ts';
@@ -325,4 +326,16 @@ test('Makro-Belegung 09 <Art> <Platz> 00', () => {
   assert.deepEqual(macroBindingEntry(0, 'while-held'), [9, 2, 0, 0]);
   assert.deepEqual(decodeMacroBinding([9, 0, 7, 0]), { slot: 7, mode: 'count' });
   assert.equal(decodeMacroBinding([0, 0, 4, 0]), null);
+});
+
+test('Erweiterte Tasten: Einzeltaste je Ebene (Standard = Werkstaste, leer = 00 00 00 00)', () => {
+  const f12 = 72;
+  assert.equal(entryToKeyCode([0, 0, 0x45, 0], f12), 'F12');
+  assert.equal(entryToKeyCode([0, 0, 0xe1, 0], f12), 'ShiftLeft');
+  assert.equal(entryToKeyCode([0, 0, 0, 0], f12), '');
+  assert.equal(entryToKeyCode([3, 0, 0xe2, 0], f12), null);
+  assert.deepEqual(keyCodeToEntry('ShiftLeft', f12), [0, 0, 0xe1, 0]);
+  assert.deepEqual(keyCodeToEntry('', f12), [0, 0, 0, 0]);
+  assert.deepEqual(Array.from(magnetismKeyPacket(MAGNETISM.mtTime, f12, true, [20]).slice(0, 9)),
+    [0x65, 5, 0, 72, 1, 0, 0, checksum([0x65, 5, 0, 72, 1, 0, 0], 7), 20]);
 });

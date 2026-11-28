@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { keyLabel } from '../device/layout';
 import { newId, type AdvancedKey, type AdvancedKind, type SnapMode } from '../device/model';
-import { useApp, useProfile } from '../store';
+import { useApp, useCapabilities, useProfile } from '../store';
 import { Card, EmptyHint, KeyCodeSelect, PanelHeader, Slider } from '../components/ui';
 import { Icon } from '../components/Icon';
 
@@ -26,8 +26,18 @@ export function AdvancedPanel() {
   const layout = useApp((s) => s.layout);
   const editProfile = useApp((s) => s.editProfile);
   const profile = useProfile();
+  const caps = useCapabilities().advanced;
   const [editingId, setEditingId] = useState<string | null>(null);
   if (!profile) return null;
+
+  /** Tasten, die schon eine erweiterte Funktion haben (eine pro Taste). */
+  const taken = new Set(profile.advanced.flatMap((a) => (a.kind === 'snap' ? a.keys : [a.key])));
+  const blocked = (k: (typeof KINDS)[number]) =>
+    caps && !caps.kinds.includes(k.kind) ? 'Wird von dieser Tastatur noch nicht unterstützt'
+    : selected.length < k.keys ? `Benötigt ${k.keys} ausgewählte Taste(n)`
+    : selected.slice(0, k.keys).some((s) => taken.has(s)) ? 'Die Taste hat schon eine erweiterte Funktion'
+    : k.kind === 'snap' && selected[0] === selected[1] ? 'Zwei verschiedene Tasten wählen'
+    : '';
 
   const create = (kind: AdvancedKind) => {
     const id = newId(kind);
@@ -35,8 +45,10 @@ export function AdvancedPanel() {
     let entry: AdvancedKey;
     if (kind === 'dks') entry = { id, kind, key, firstPoint: 1.0, secondPoint: 3.0, bindings: [{ code: key, phases: [true, false, false, true] }] };
     else if (kind === 'mt') entry = { id, kind, key, tap: key, hold: 'ShiftLeft', holdMs: 200 };
-    else if (kind === 'tgl') entry = { id, kind, key, code: key };
-    else entry = { id, kind, keys: [selected[0], selected[1]], mode: 'last' };
+    else if (kind === 'tgl') entry = { id, kind, key, code: key, variant: 'hold' };
+    else entry = caps && !caps.snapModes
+      ? { id, kind, keys: [selected[0], selected[1]] }
+      : { id, kind, keys: [selected[0], selected[1]], mode: 'last' };
     editProfile((p) => void p.advanced.push(entry));
     setEditingId(id);
   };
@@ -58,13 +70,16 @@ export function AdvancedPanel() {
         <Card title="Neue erweiterte Taste">
           <EmptyHint>Wähle zuerst die Taste(n) auf der Tastatur, dann die Art.</EmptyHint>
           <div className="stack">
-            {KINDS.map((k) => (
-              <button key={k.kind} className="option-card" disabled={selected.length < k.keys} onClick={() => create(k.kind)}>
-                <strong>{k.title}</strong>
-                <span>{k.text}</span>
-                {selected.length < k.keys && <small>Benötigt {k.keys} ausgewählte Taste(n)</small>}
-              </button>
-            ))}
+            {KINDS.map((k) => {
+              const why = blocked(k);
+              return (
+                <button key={k.kind} className="option-card" disabled={!!why} onClick={() => create(k.kind)}>
+                  <strong>{k.title}</strong>
+                  <span>{k.kind === 'snap' && caps && !caps.snapModes ? 'Zwei Tasten (z. B. A/D): Sind beide gedrückt, gilt die zuletzt gedrückte.' : k.text}</span>
+                  {why && <small>{why}</small>}
+                </button>
+              );
+            })}
           </div>
         </Card>
         <Card title={`Aktive erweiterte Tasten (${profile.advanced.length})`}>
@@ -122,14 +137,28 @@ export function AdvancedPanel() {
                 <>
                   <label className="field">Tippen<KeyCodeSelect value={editing.tap} onChange={(c) => update(editing.id, (a) => a.kind === 'mt' && (a.tap = c))} /></label>
                   <label className="field">Halten<KeyCodeSelect value={editing.hold} onChange={(c) => update(editing.id, (a) => a.kind === 'mt' && (a.hold = c))} /></label>
-                  <Slider label="Haltezeit" value={editing.holdMs} min={50} max={1000} step={10} unit="ms"
+                  <Slider label="Haltezeit" value={editing.holdMs} min={50} max={Math.min(1000, caps?.mtMaxMs ?? 1000)} step={10} unit="ms"
                     onChange={(v) => update(editing.id, (a) => a.kind === 'mt' && (a.holdMs = v))} />
                 </>
               )}
               {editing.kind === 'tgl' && (
-                <label className="field">Umgeschaltete Taste<KeyCodeSelect value={editing.code} onChange={(c) => update(editing.id, (a) => a.kind === 'tgl' && (a.code = c))} /></label>
+                <>
+                  <label className="field">Umgeschaltete Taste<KeyCodeSelect value={editing.code} onChange={(c) => update(editing.id, (a) => a.kind === 'tgl' && (a.code = c))} /></label>
+                  {(!caps || caps.tglVariants) && (
+                    <label className="field">Verhalten
+                      <select value={editing.variant ?? 'hold'}
+                        onChange={(e) => update(editing.id, (a) => a.kind === 'tgl' && (a.variant = e.target.value as 'hold' | 'repeat'))}>
+                        <option value="hold">Halten (bis zum nächsten Druck gedrückt)</option>
+                        <option value="repeat">Dauerklick (wiederholt bis zum nächsten Druck)</option>
+                      </select>
+                    </label>
+                  )}
+                </>
               )}
-              {editing.kind === 'snap' && (
+              {editing.kind === 'snap' && caps && !caps.snapModes && (
+                <p className="hint">Sind beide Tasten gedrückt, gilt die zuletzt gedrückte (auf dieser Tastatur fest).</p>
+              )}
+              {editing.kind === 'snap' && (!caps || caps.snapModes) && (
                 <label className="field">Modus
                   <select value={editing.mode} onChange={(e) => update(editing.id, (a) => a.kind === 'snap' && (a.mode = e.target.value as SnapMode))}>
                     {SNAP_MODES.map((m) => <option key={m.mode} value={m.mode}>{m.label}</option>)}

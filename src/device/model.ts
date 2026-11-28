@@ -39,8 +39,10 @@ export interface DksBinding {
 export type AdvancedKey =
   | { id: string; kind: 'dks'; key: KeyId; firstPoint: number; secondPoint: number; bindings: DksBinding[] }
   | { id: string; kind: 'mt'; key: KeyId; tap: string; hold: string; holdMs: number }
-  | { id: string; kind: 'tgl'; key: KeyId; code: string }
-  | { id: string; kind: 'snap'; keys: [KeyId, KeyId]; mode: SnapMode };
+  /** `variant`: 'hold' = gedrückt halten bis zum nächsten Druck, 'repeat' = Dauerklick (fehlt = 'hold') */
+  | { id: string; kind: 'tgl'; key: KeyId; code: string; variant?: 'hold' | 'repeat' }
+  /** `mode` fehlt = Gerät entscheidet (TK75: letzte Eingabe gewinnt, keine Auswahl) */
+  | { id: string; kind: 'snap'; keys: [KeyId, KeyId]; mode?: SnapMode };
 
 export type AdvancedKind = AdvancedKey['kind'];
 

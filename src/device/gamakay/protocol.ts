@@ -305,10 +305,20 @@ export const MAGNETISM = {
   release: 1,
   rtPress: 2,
   rtRelease: 3,
+  dksPoint: 4,
+  mtTime: 5,
   deadzoneBottom: 6,
   modes: 7,
+  dksPhases: 8,
+  snapPartner: 9,
   deadzoneTop: 251,
 } as const;
+
+/** Tastenmodus (Art 7, Bits 0–6; GearHub _magnetismModesOptionToNum). */
+export const KEY_MODE = { normal: 0, dks: 2, mt: 3, tglHold: 4, tglRepeat: 5, snap: 7 } as const;
+/** Mod-Tap-Zeit: 1 Byte in 10-ms-Schritten (GearHub `mt_time / 10`). */
+export const MT_TIME_STEP_MS = 10;
+export const MT_TIME_MAX_MS = 2550;
 
 export function decodeU16List(bytes: ArrayLike<number>): number[] {
   const out: number[] = [];
@@ -500,6 +510,21 @@ export function decodeKeyAction(entry: ArrayLike<number>, slot: number, layer: M
   if (codes.some((c) => !c)) return null;
   if (e[1] === 0 && e[3] === 0) return { kind: 'key', code: codes[0] };
   return { kind: 'combo', codes };
+}
+
+/**
+ * Einzeltaste in einer Belegungsebene (erweiterte Tasten): '' = leer (`00 00 00 00`).
+ * Ebene 0 nutzt die normale Belegung, „Standard“ = Werkstaste dieses Platzes.
+ */
+export function entryToKeyCode(entry: ArrayLike<number>, slot: number): string | null {
+  const a = decodeKeyAction(entry, slot, 'base');
+  if (!a) return null;
+  if (a.kind === 'default') return TK75_SLOTS[slot] ?? null;
+  if (a.kind === 'disabled') return '';
+  return a.kind === 'key' ? a.code : null;
+}
+export function keyCodeToEntry(code: string, slot: number): number[] {
+  return code ? encodeKeyAction({ kind: 'key', code }, slot, 'base') : [0, 0, 0, 0];
 }
 
 /** Deutsche Namen für Sonderbelegungen, die die App (noch) nicht als Funktion anbietet (nur zur Anzeige). */

@@ -1,6 +1,6 @@
-import type { ConfigSection, DeviceConfig, LightingConfig, MacroStep } from './model';
+import type { AdvancedKind, ConfigSection, DeviceConfig, LightingConfig, MacroStep } from './model';
 import {
-  MACRO_BYTES, MACRO_SLOTS, encodeMacro, LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_DEFAULT_MATRIX, TK75_KEYMAP_SLOTS, TK75_KNOB_SLOTS, describeRawEntry,
+  MACRO_BYTES, MACRO_SLOTS, MT_TIME_MAX_MS, encodeMacro, LED_EFFECTS, POLLING_RATES, SIDE_LED_EFFECTS, SIDE_SPEED_MAX, TK75_DEFAULT_FN_MATRIX, TK75_DEFAULT_MATRIX, TK75_KEYMAP_SLOTS, TK75_KNOB_SLOTS, describeRawEntry,
 } from './gamakay/protocol';
 
 export interface DeviceInfo {
@@ -30,6 +30,8 @@ export interface Capabilities {
   factoryFn?: Record<string, { code?: string; fn?: string; label?: string }>;
   /** Werksbelegung der Basis-Ebene für Teile ohne eigene Beschriftung (Drehknopf) */
   factoryBase?: Record<string, { code?: string; fn?: string; label?: string }>;
+  /** Erweiterte Tasten: schreibbare Arten, ob Snap Tap Modi kennt, Toggle-Varianten, längste Mod-Tap-Zeit. Fehlt = alles. */
+  advanced?: { kinds: AdvancedKind[]; snapModes: boolean; tglVariants: boolean; mtMaxMs: number };
   /** Makrospeicher: Plätze, Byte je Makro und Größe einer Schrittfolge (Fehlertext, wenn nicht schreibbar) */
   macros?: { slots: number; bytes: number; size(steps: MacroStep[]): number | string };
 }
@@ -62,6 +64,8 @@ export const TK75_CAPABILITIES: Capabilities = {
   lightLevels: 4,
   sideLightEffects: SIDE_LED_EFFECTS.map(({ id, label, rainbowOnly }) => ({ id, label, rainbowOnly })),
   sideSpeedMax: SIDE_SPEED_MAX,
+  // DKS fehlt noch: Bedeutung der Phasenwerte ist offen (docs/protocol.md).
+  advanced: { kinds: ['mt', 'tgl', 'snap'], snapModes: false, tglVariants: true, mtMaxMs: MT_TIME_MAX_MS },
   macros: {
     slots: MACRO_SLOTS,
     bytes: MACRO_BYTES,
