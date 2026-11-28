@@ -8,6 +8,7 @@ import {
   decodeKeyMatrix, decodeKeyMode, decodeU16List, magnetismReadPacket,
   checksum, decodeInfoName, decodeLed, decodeSleep, ledBrightnessPacket, ledPacket, makePacket, rawToSpeed, readPacket,
   entryToKeyCode, keyCodeToEntry, magnetismKeyPacket, MAGNETISM,
+  encodeDksPhases, decodeDksPhases, dksEntryToKeyCode, dksKeyCodeToEntry,
   encodeMacro, decodeMacro, macroWritePackets, macroReadPacket, macroBindingEntry, decodeMacroBinding,
   decodeDongleStatus, decodeReportRate, reportRatePacket, sideLedPacket, sleepPacket, speedToRaw,
 } from './protocol.ts';
@@ -338,4 +339,24 @@ test('Erweiterte Tasten: Einzeltaste je Ebene (Standard = Werkstaste, leer = 00 
   assert.deepEqual(keyCodeToEntry('', f12), [0, 0, 0, 0]);
   assert.deepEqual(Array.from(magnetismKeyPacket(MAGNETISM.mtTime, f12, true, [20]).slice(0, 9)),
     [0x65, 5, 0, 72, 1, 0, 0, checksum([0x65, 5, 0, 72, 1, 0, 0], 7), 20]);
+});
+
+test('DKS auf F12 ergibt exakt die GearHub-Pakete (Mitschnitt 2026-11-28)', () => {
+  const f12 = 72;
+  // Zeilen: A Klick Phase 1, B Balken 1→4, C Klick Phase 2, D Balken 1→2
+  assert.equal(encodeDksPhases(['tap', 'off', 'off', 'off']), 0x01);
+  assert.equal(encodeDksPhases(['holdOn', 'holdOn', 'hold', 'off']), 0x2f);
+  assert.equal(encodeDksPhases(['off', 'tap', 'off', 'off']), 0x04);
+  assert.equal(encodeDksPhases(['hold', 'off', 'off', 'off']), 0x02);
+  assert.deepEqual(decodeDksPhases(0x2f), ['holdOn', 'holdOn', 'hold', 'off']);
+  assert.deepEqual(Array.from(magnetismKeyPacket(MAGNETISM.dksPhases, f12, true, [1, 0x2f, 4, 2]).slice(0, 12)),
+    bytes('65 08 00 48 01 00 00 49 01 2f 04 02'));
+  assert.deepEqual(Array.from(magnetismKeyPacket(MAGNETISM.dksPoint, f12, false, [70, 0]).slice(0, 10)), bytes('65 04 00 48 00 00 00 4e 46 00'));
+  assert.deepEqual(Array.from(magnetismKeyPacket(MAGNETISM.modes, f12, false, [2]).slice(0, 9)), bytes('65 07 00 48 00 00 00 4b 02'));
+  assert.deepEqual(dksKeyCodeToEntry('KeyA', f12), [0, 4, 0, 0]);
+  assert.equal(dksEntryToKeyCode([0, 7, 0, 0], f12), 'KeyD');
+  assert.equal(dksEntryToKeyCode([0, 0, 0, 0], f12), '');
+  assert.equal(dksEntryToKeyCode([0, 0xe0, 4, 0], f12), null);
+  assert.throws(() => encodeDksPhases(['off', 'off', 'off', 'hold']));
+  assert.throws(() => encodeDksPhases(['holdOn', 'tap', 'off', 'off']));
 });

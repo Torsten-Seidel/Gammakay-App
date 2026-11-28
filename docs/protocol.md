@@ -342,9 +342,15 @@ Am Gerät geprüft (2026-11-28, Bluetooth, je ~3–4 s inkl. Kontroll-Lesen), da
   Einzeln: DKS-Phasen `65 08 00 <Platz> <Ende>` + 4 Byte; Snap: beide Tasten Art 7 = 7, dann Art 9 gegenseitig (Ende auf dem letzten).
 - **Belegungen liegen in Matrix-Ebenen** (`8a <Profil> ff <Seite> <Ebene>`, `0a … <Ebene>` in Byte 6; GearHub `sonProfile` 0–3):
   DKS-Belegung g = Ebene g (Ebene 0 = normale Belegung), Mod-Tap halten = Ebene 0, tippen = Ebene 1, Toggle = Ebene 0.
-  Belegungen sind Kombinationen `00 <HID1> <HID2> <HID3>` (bis 3 Tasten).
-- DKS-Phasenbyte je Belegung: 4 Phasen à 2 Bit (`p0 | p1<<2 | p2<<4 | p3<<6`), Werte 0–3. **Bedeutung der Werte offen**
-  (steht im nicht gespeicherten GearHub-Oberflächenteil) → Mitschnitt nötig.
+  DKS-Belegungen sind Kombinationen `00 <HID1> <HID2> <HID3>` (bis 3 Tasten; eine Taste A = `00 04 00 00`, nicht `00 00 04 00`).
+- DKS-Phasenbyte je Belegung: 4 Phasen à 2 Bit (`p0 | p1<<2 | p2<<4 | p3<<6`). Phasen: 1. Punkt ↓, ganz ↓, ganz ↑, 1. Punkt ↑.
+  Werte: 0 nichts, 1 tippen (Klick auf das Symbol), 2 drücken und in der nächsten Phase loslassen (Balkenende),
+  3 gedrückt weiter in die nächste Phase (Balken läuft durch). Ein Balken von Phase i bis j = `3 … 3 2` in den Phasen i … j−1.
+- Mitschnitt GearHub (Kabel, 2026-11-28), DKS auf F12 (Platz 72) mit A = Klick Phase 1, B = Balken 1→4, C = Klick Phase 2,
+  D = Balken 1→2, Punkt 0,70 mm. Reihenfolge wie GearHub:
+  `0a 00 48 00 00 00 <Ebene 0–3> <chk>` + `00 04 00 00` … `00 07 00 00` (Ende-Byte 5 = 1 nur bei Ebene 3),
+  `65 07 00 48 00` + `02` (Modus DKS), `65 04 00 48 00` + `46 00` (Punkt 70 = 0,70 mm), `65 08 00 48 01` + `01 2f 04 02`.
+  Gelesen mit der App (Art 4, Art 10, Ebenen 1–3): identisch.
 - Snap Tap hat auf der TK75 keine Modi (letzte gewinnt / neutral …), nur das Tastenpaar.
 
 ## Offen / nächste Mitschnitte

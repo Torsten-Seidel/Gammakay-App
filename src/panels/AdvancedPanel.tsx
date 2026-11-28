@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { keyLabel } from '../device/layout';
-import { newId, type AdvancedKey, type AdvancedKind, type SnapMode } from '../device/model';
+import { dksAction, newId, type AdvancedKey, type AdvancedKind, type DksAction, type SnapMode } from '../device/model';
 import { useApp, useCapabilities, useProfile } from '../store';
 import { Card, EmptyHint, KeyCodeSelect, PanelHeader, Slider } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -20,6 +20,13 @@ const SNAP_MODES: { mode: SnapMode; label: string }[] = [
 ];
 
 const PHASES = ['1. Punkt ↓', 'ganz ↓', 'ganz ↑', '1. Punkt ↑'];
+
+const DKS_ACTIONS: { value: DksAction; label: string; title: string }[] = [
+  { value: 'off', label: '–', title: 'Nichts' },
+  { value: 'tap', label: 'Tippen', title: 'Kurz auslösen (drücken und gleich loslassen)' },
+  { value: 'hold', label: 'Halten bis →', title: 'Drücken und in der nächsten Phase loslassen' },
+  { value: 'holdOn', label: 'Halten weiter →', title: 'Gedrückt lassen, in der nächsten Phase geht es weiter („Halten bis →“ oder „Halten weiter →“)' },
+];
 
 export function AdvancedPanel() {
   const selected = useApp((s) => s.selected);
@@ -43,7 +50,11 @@ export function AdvancedPanel() {
     const id = newId(kind);
     const key = selected[0];
     let entry: AdvancedKey;
-    if (kind === 'dks') entry = { id, kind, key, firstPoint: 1.0, secondPoint: 3.0, bindings: [{ code: key, phases: [true, false, false, true] }] };
+    // Start: die Taste selbst, gedrückt vom 1. Punkt bis zum Loslassen – verhält sich wie eine normale Taste.
+    if (kind === 'dks') entry = {
+      id, kind, key, firstPoint: caps?.dksPoint.default ?? 1.0, ...(caps && !caps.dksSecondPoint ? {} : { secondPoint: 3.0 }),
+      bindings: [{ code: key, phases: ['holdOn', 'holdOn', 'hold', 'off'] }],
+    };
     else if (kind === 'mt') entry = { id, kind, key, tap: key, hold: 'ShiftLeft', holdMs: 200 };
     else if (kind === 'tgl') entry = { id, kind, key, code: key, variant: 'hold' };
     else entry = caps && !caps.snapModes
@@ -100,10 +111,18 @@ export function AdvancedPanel() {
             <div className="editor">
               {editing.kind === 'dks' && (
                 <>
-                  <Slider label="1. Auslösepunkt" value={editing.firstPoint} min={0.1} max={3.4} step={0.05} unit="mm"
+                  <Slider label="1. Auslösepunkt" value={editing.firstPoint} min={caps?.dksPoint.min ?? 0.1} max={caps?.dksPoint.max ?? 3.4} step={0.05} unit="mm"
                     onChange={(v) => update(editing.id, (a) => a.kind === 'dks' && (a.firstPoint = v))} />
-                  <Slider label="2. Auslösepunkt" value={editing.secondPoint} min={0.1} max={3.4} step={0.05} unit="mm"
-                    onChange={(v) => update(editing.id, (a) => a.kind === 'dks' && (a.secondPoint = v))} />
+                  {(!caps || caps.dksSecondPoint) ? (
+                    <Slider label="2. Auslösepunkt" value={editing.secondPoint ?? 3.0} min={0.1} max={3.4} step={0.05} unit="mm"
+                      onChange={(v) => update(editing.id, (a) => a.kind === 'dks' && (a.secondPoint = v))} />
+                  ) : (
+                    <p className="hint">Der 2. Punkt ist auf dieser Tastatur fest: ganz unten.</p>
+                  )}
+                  <p className="hint">
+                    Je Phase: „Tippen“ löst kurz aus. „Halten bis →“ drückt und lässt in der nächsten Phase los.
+                    „Halten weiter →“ bleibt gedrückt bis in die nächste Phase.
+                  </p>
                   <table className="dks-table">
                     <thead>
                       <tr><th>Taste</th>{PHASES.map((p) => <th key={p}>{p}</th>)}<th /></tr>
@@ -112,10 +131,15 @@ export function AdvancedPanel() {
                       {editing.bindings.map((b, i) => (
                         <tr key={i}>
                           <td><KeyCodeSelect value={b.code} onChange={(c) => update(editing.id, (a) => a.kind === 'dks' && (a.bindings[i].code = c))} /></td>
-                          {b.phases.map((on, j) => (
+                          {b.phases.map((p, j) => (
                             <td key={j}>
-                              <input type="checkbox" checked={on}
-                                onChange={(e) => update(editing.id, (a) => a.kind === 'dks' && (a.bindings[i].phases[j] = e.target.checked))} />
+                              <select value={dksAction(p)} title={DKS_ACTIONS.find((x) => x.value === dksAction(p))?.title}
+                                onChange={(e) => update(editing.id, (a) => a.kind === 'dks' && (a.bindings[i].phases[j] = e.target.value as DksAction))}>
+                                {/* In der letzten Phase gibt es keine nächste – nur Tippen. */}
+                                {DKS_ACTIONS.filter((x) => j < 3 || x.value === 'off' || x.value === 'tap').map((x) => (
+                                  <option key={x.value} value={x.value} title={x.title}>{x.label}</option>
+                                ))}
+                              </select>
                             </td>
                           ))}
                           <td>
@@ -128,7 +152,7 @@ export function AdvancedPanel() {
                     </tbody>
                   </table>
                   <button className="btn ghost" disabled={editing.bindings.length >= 4}
-                    onClick={() => update(editing.id, (a) => a.kind === 'dks' && a.bindings.push({ code: '', phases: [false, false, false, false] }))}>
+                    onClick={() => update(editing.id, (a) => a.kind === 'dks' && a.bindings.push({ code: '', phases: ['off', 'off', 'off', 'off'] }))}>
                     Aktion hinzufügen
                   </button>
                 </>

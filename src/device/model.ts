@@ -30,14 +30,27 @@ export interface SwitchConfig {
 
 export type SnapMode = 'last' | 'neutral' | 'first-wins' | 'second-wins';
 
+/**
+ * Was eine DKS-Belegung in einer Phase tut:
+ * 'off' nichts, 'tap' kurz auslösen, 'hold' drücken und in der nächsten Phase loslassen,
+ * 'holdOn' gedrückt weiter in die nächste Phase (dort 'hold' oder wieder 'holdOn').
+ */
+export type DksAction = 'off' | 'tap' | 'hold' | 'holdOn';
+
 export interface DksBinding {
   code: string;
-  /** Phasen: 1. Punkt drücken, ganz drücken, ganz loslassen → zurück, 1. Punkt loslassen */
-  phases: [boolean, boolean, boolean, boolean];
+  /** Phasen: 1. Punkt drücken, ganz drücken, ganz loslassen, 1. Punkt loslassen */
+  phases: [DksAction, DksAction, DksAction, DksAction];
+}
+
+/** Ältere gespeicherte Stände hatten Ja/Nein je Phase. */
+export function dksAction(v: DksAction | boolean | undefined): DksAction {
+  return v === true ? 'tap' : v === false || v === undefined ? 'off' : v;
 }
 
 export type AdvancedKey =
-  | { id: string; kind: 'dks'; key: KeyId; firstPoint: number; secondPoint: number; bindings: DksBinding[] }
+  /** `secondPoint` fehlt = fest ganz unten (TK75) */
+  | { id: string; kind: 'dks'; key: KeyId; firstPoint: number; secondPoint?: number; bindings: DksBinding[] }
   | { id: string; kind: 'mt'; key: KeyId; tap: string; hold: string; holdMs: number }
   /** `variant`: 'hold' = gedrückt halten bis zum nächsten Druck, 'repeat' = Dauerklick (fehlt = 'hold') */
   | { id: string; kind: 'tgl'; key: KeyId; code: string; variant?: 'hold' | 'repeat' }

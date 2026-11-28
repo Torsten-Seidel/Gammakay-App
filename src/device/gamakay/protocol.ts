@@ -309,8 +309,11 @@ export const MAGNETISM = {
   mtTime: 5,
   deadzoneBottom: 6,
   modes: 7,
+  /** Schreiben je Taste: 4 Byte = Phasenbyte je Belegung */
   dksPhases: 8,
   snapPartner: 9,
+  /** Lesen: 8 Seiten = 4 Blöcke à 128 Byte, Block g = Belegung g */
+  dksPhasesRead: 10,
   deadzoneTop: 251,
 } as const;
 
@@ -319,6 +322,34 @@ export const KEY_MODE = { normal: 0, dks: 2, mt: 3, tglHold: 4, tglRepeat: 5, sn
 /** Mod-Tap-Zeit: 1 Byte in 10-ms-Schritten (GearHub `mt_time / 10`). */
 export const MT_TIME_STEP_MS = 10;
 export const MT_TIME_MAX_MS = 2550;
+
+/** DKS-Auslösepunkt (Art 4, u16 in 0,01 mm; GearHub 0,5–2,5 mm, Standard 0,7). Der zweite Punkt ist fest ganz unten. */
+export const DKS_POINT_MM = { min: 0.5, max: 2.5, default: 0.7 } as const;
+/** Höchstens 4 Belegungen; Belegung g liegt in Matrix-Ebene g. */
+export const DKS_BINDINGS = 4;
+
+/**
+ * DKS-Phasenbyte (Art 8 schreiben / Art 10 lesen): 4 Phasen à 2 Bit, `p0 | p1<<2 | p2<<4 | p3<<6`.
+ * 0 nichts, 1 tippen, 2 drücken + in der nächsten Phase loslassen, 3 gedrückt weiter in die nächste Phase.
+ * Mitschnitt GearHub 2026-11-28: Klick in Phase 1 = 01, Balken Phase 1→4 = 2f (3,3,2,0), Klick Phase 2 = 04, Balken 1→2 = 02.
+ */
+export type DksAction = 'off' | 'tap' | 'hold' | 'holdOn'; // wie im Modell
+const DKS_ACTIONS: DksAction[] = ['off', 'tap', 'hold', 'holdOn'];
+
+export function encodeDksPhases(phases: readonly DksAction[]): number {
+  if (phases.length !== 4) throw new Error('DKS hat 4 Phasen');
+  phases.forEach((p, i) => {
+    if (i === 3 && (p === 'hold' || p === 'holdOn')) throw new Error('In der letzten Phase kann DKS nur tippen.');
+    if (p === 'holdOn' && (phases[i + 1] === 'off' || phases[i + 1] === 'tap')) {
+      throw new Error('„Halten weiter“ braucht in der nächsten Phase „Halten“ oder „Halten weiter“.');
+    }
+  });
+  return phases.reduce((b, p, i) => b | (DKS_ACTIONS.indexOf(p) << (i * 2)), 0);
+}
+
+export function decodeDksPhases(b: number): [DksAction, DksAction, DksAction, DksAction] {
+  return [0, 1, 2, 3].map((i) => DKS_ACTIONS[(b >> (i * 2)) & 3]) as [DksAction, DksAction, DksAction, DksAction];
+}
 
 export function decodeU16List(bytes: ArrayLike<number>): number[] {
   const out: number[] = [];
@@ -525,6 +556,21 @@ export function entryToKeyCode(entry: ArrayLike<number>, slot: number): string |
 }
 export function keyCodeToEntry(code: string, slot: number): number[] {
   return code ? encodeKeyAction({ kind: 'key', code }, slot, 'base') : [0, 0, 0, 0];
+}
+
+/**
+ * DKS-Belegungen stehen im Kombi-Format `00 <HID1> <HID2> <HID3>` (GearHub schreibt A als `00 04 00 00`).
+ * Lesen: '' = leer, null = mehrere Tasten oder unbekannt. Das normale Format `00 00 <HID> 00` wird auch erkannt.
+ */
+export function dksEntryToKeyCode(entry: ArrayLike<number>, slot: number): string | null {
+  const [t, a, b, c] = Array.from(entry);
+  if (!t && !a && !b && !c) return '';
+  if (t || c || (a && b)) return null;
+  return entryToKeyCode([0, 0, a || b, 0], slot);
+}
+export function dksKeyCodeToEntry(code: string, slot: number): number[] {
+  const [, , hid] = keyCodeToEntry(code, slot);
+  return [0, hid, 0, 0];
 }
 
 /** Deutsche Namen für Sonderbelegungen, die die App (noch) nicht als Funktion anbietet (nur zur Anzeige). */
