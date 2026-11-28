@@ -166,6 +166,8 @@ export class GamakayHidDriver implements KeyboardDriver {
   private macroModes: Record<number, 'count' | 'toggle' | 'while-held'> = {};
   /** Zuletzt gelesener Stand je Platz (macroSig) */
   private macroRead: Record<number, string> = {};
+  /** Plätze mit Inhalt; beim ersten Lesen werden alle Plätze durchsucht, danach nur noch diese. */
+  private macroSlotsWithData: Set<number> | null = null;
 
   private constructor(device: HIDDevice) {
     const transport = isBtConfig(device) ? 'bt' : isDongleConfig(device) ? 'dongle' : 'usb';
@@ -358,26 +360,35 @@ export class GamakayHidDriver implements KeyboardDriver {
       const res = (await this.transport.queryRaw(macroReadPacket(slot, page))).subarray(0, PACKET_SIZE);
       if (page === 0) log('info', `Makro ${slot} Seite 0 roh: ${toHex(res, 32)}`);
       out.push(...res);
-      if (macroPageHasEnd(res)) break;
+      if (macroPageHasEnd(res) || res.every((b) => b === 0xff)) break; // ff = nie beschriebener Speicher
     }
     return Uint8Array.from(out);
   }
 
   /**
-   * Makros lesen: alle Plätze, die eine Taste (Basis oder Fn) belegt, plus die Plätze, die die App selbst angelegt hat.
+   * Makros lesen: beim ersten Mal alle Plätze (auch Reste aus GearHub ohne Taste), danach die Plätze mit Inhalt,
+   * die eine Taste (Basis oder Fn) belegt oder die die App selbst angelegt hat.
    * Die Wiedergabeart steht nicht im Makro, sondern in der Belegung (`09 <Art> <Platz>`).
+   * Leere Plätze lesen `00 …` (geleert) oder `ff …` (nie beschrieben).
    */
   private async readMacros(): Promise<Macro[]> {
     const names = loadMacroNames();
-    const slots = [...new Set([...Object.keys(this.macroModes), ...Object.keys(names)].map(Number))]
-      .filter((n) => Number.isInteger(n) && n >= 0 && n < MACRO_SLOTS).sort((a, b) => a - b);
+    const scan = !this.macroSlotsWithData;
+    const wanted = scan ? Array.from({ length: MACRO_SLOTS }, (_, i) => i)
+      : [...this.macroSlotsWithData!, ...Object.keys(this.macroModes).map(Number), ...Object.keys(names).map(Number)];
+    const slots = [...new Set(wanted)].filter((n) => Number.isInteger(n) && n >= 0 && n < MACRO_SLOTS).sort((a, b) => a - b);
     this.macroRead = {};
     if (!slots.length) return [];
-    this.progress('Lese Makros …');
+    this.progress(scan ? 'Durchsuche Makrospeicher …' : 'Lese Makros …');
     this.addOps(slots.length);
     const macros: Macro[] = [];
+    const withData = new Set<number>();
     for (const slot of slots) {
       const { repeat, steps, skipped } = decodeMacro(await this.readMacroData(slot));
+      const empty = !steps.length && !skipped && (repeat === 0 || repeat === 0xffff);
+      const own = slot in this.macroModes || slot in names;
+      if (empty && !own) continue;
+      if (!empty) withData.add(slot);
       const mode = this.macroModes[slot] ?? 'count';
       const count = repeat >= 1 && repeat < 0xffff ? repeat : 1; // ffff = leerer Speicher
       const playback: MacroPlayback = mode !== 'count' ? mode : count > 1 ? 'repeat' : 'once';
@@ -386,7 +397,9 @@ export class GamakayHidDriver implements KeyboardDriver {
       macros.push(m);
       if (skipped) log('info', `Makro ${slot}: ${skipped} Mausbewegung(en) übersprungen (kennt die App nicht)`);
     }
-    log('info', `Gelesen: ${macros.length} Makros (Plätze ${slots.join(', ')})`);
+    this.macroSlotsWithData = withData;
+    log('info', `Gelesen: ${macros.length} Makros (Plätze ${macros.map((m) => slots.find((s) => this.macroSlotIds[s] === m.id)).join(', ')})` +
+      (scan ? `, ${slots.length} Plätze durchsucht` : ''));
     return macros;
   }
 
@@ -423,11 +436,18 @@ export class GamakayHidDriver implements KeyboardDriver {
    */
   private async writeMacros(config: DeviceConfig): Promise<void> {
     const slots = this.assignMacroSlots(config.macros);
-    const changes = config.macros.flatMap((m) => {
+    // Gelöschte Makros: Einen Löschbefehl gibt es nicht → Platz mit Nullen überschreiben (liest danach wie leer).
+    // Plätze, die gerade ein neues Makro bekommen hat, werden ohnehin überschrieben.
+    const kept = new Set(slots.values());
+    const removed = Object.entries(this.macroSlotIds)
+      .filter(([slot, id]) => !config.macros.some((m) => m.id === id) && Number(slot) in this.macroRead && !kept.has(Number(slot)))
+      .map(([slot, id]) => ({ m: { id, name: `Makro ${Number(slot) + 1}`, steps: [], repeat: 0, playback: 'once' } as Macro, slot: Number(slot), packets: macroWritePackets(Number(slot), []) }));
+    const changes = [...removed, ...config.macros.flatMap((m) => {
       const slot = slots.get(m.id)!;
       if (macroSig(m) === this.macroRead[slot]) return [];
       return [{ m, slot, packets: macroWritePackets(slot, encodeMacro(m.steps, macroRepeat(m))) }];
-    });
+    })];
+    const isRemoved = (c: { m: Macro }) => removed.some((r) => r.m === c.m);
     // Namen merken (auch ohne Änderung der Gerätedaten); gelöschte Makros geben ihren Platz frei.
     saveMacroNames(Object.fromEntries(config.macros.map((m) => [slots.get(m.id)!, m.name])));
     for (const slot of Object.keys(this.macroSlotIds).map(Number)) {
@@ -436,9 +456,14 @@ export class GamakayHidDriver implements KeyboardDriver {
     if (changes.length) {
       this.addOps(changes.reduce((n, c) => n + c.packets.length + 1, 0));
       for (const [n, { m, slot, packets }] of changes.entries()) {
-        this.progress(`Schreibe Makro „${m.name}“ (${n + 1}/${changes.length}) …`);
-        log('info', `Schreibe Makro ${slot} „${m.name}“: ${m.steps.filter((s) => s.type !== 'delay').length} Ereignisse, ` +
-          `${m.playback}${m.playback === 'repeat' ? ` ×${m.repeat}` : ''} (${packets.length} Pakete)`);
+        if (isRemoved({ m })) {
+          this.progress(`Lösche Makro-Platz ${slot + 1} (${n + 1}/${changes.length}) …`);
+          log('info', `Lösche Makro ${slot} (mit Nullen überschreiben)`);
+        } else {
+          this.progress(`Schreibe Makro „${m.name}“ (${n + 1}/${changes.length}) …`);
+          log('info', `Schreibe Makro ${slot} „${m.name}“: ${m.steps.filter((s) => s.type !== 'delay').length} Ereignisse, ` +
+            `${m.playback}${m.playback === 'repeat' ? ` ×${m.repeat}` : ''} (${packets.length} Pakete)`);
+        }
         for (const p of packets) await this.transport.write(p);
         await sleep(KEY_WRITE_GAP_MS); // GearHub: vendorSleep nach jedem Makro
       }
@@ -449,6 +474,11 @@ export class GamakayHidDriver implements KeyboardDriver {
         const lost: string[] = [];
         for (const { m, slot } of changes) {
           const { repeat, steps } = decodeMacro(await this.readMacroData(slot));
+          if (isRemoved({ m })) {
+            if (repeat || steps.length) lost.push(`Löschen von Platz ${slot + 1}`);
+            else delete this.macroRead[slot];
+            continue;
+          }
           const sig = JSON.stringify(encodeMacro(steps, Math.max(1, repeat)));
           if (sig !== macroSig(m)) lost.push(m.name);
           else this.macroRead[slot] = sig;

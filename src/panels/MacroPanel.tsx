@@ -119,7 +119,7 @@ export function MacroPanel() {
                 <Icon name="record" size={14} /> {recording ? 'Aufnahme stoppen' : 'Aufnehmen'}
               </button>
               <button className="btn ghost" disabled={recording} onClick={() => update((m) => void (m.steps = []))}>Leeren</button>
-              <button className="icon-btn" disabled={recording} title="Makro löschen"
+              <button className="icon-btn" disabled={recording} title="Makro löschen (beim Übernehmen wird auch sein Platz auf der Tastatur geleert)"
                 onClick={deleteMacro}>
                 <Icon name="trash" size={16} />
               </button>

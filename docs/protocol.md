@@ -302,6 +302,8 @@ Schreiben bestätigt (Empfänger): Platz 2 = „ab“ (`01 00 04 9e 04 1e 05 9e 
 inkl. Kontroll-Lesen ~7 s; F12 tippte „ab“. Danach F12 auf Werk (~6 s).
 Ebenso per Kabel (~3 s / ~2,3 s) und Bluetooth (~3 s / ~2,1 s) geprüft; F12 tippte jeweils „ab“.
 Einen Löschbefehl gibt es nicht; Platz 2 danach mit `0b 02 00 38 01` + 56 Nullbytes geleert (liest wieder `00 …`).
+Die App macht das beim Übernehmen für jedes gelöschte Makro (geprüft über Bluetooth: Anlegen ohne Taste → Löschen
+~1,9 s inkl. Kontroll-Lesen, Platz liest danach `00 …`).
 
 - 50 Speicherplätze (GearHub `maxMacro`). Eine Taste löst ein Makro über die Belegung `09 <Art> <Platz> 00` aus
   (Basis `0a` oder Fn `10`). **Art steht in der Belegung, nicht im Makro:** 0 = Anzahl (`repeat_times`),
@@ -316,8 +318,9 @@ Einen Löschbefehl gibt es nicht; Platz 2 danach mit `0b 02 00 38 01` + 56 Nullb
   HID 04–ef Tastatur, f0–f4 Maustasten (links, rechts, Mitte, zurück, vor), `f9 <Pause|0> <dx> <dy> [Pause u16]` Mausbewegung.
   Pause 0 ist nicht darstellbar (würde als lange Form gelesen) → die App schreibt mindestens 1 ms.
 - GearHub verlangt Ereignis/Pause im Wechsel; Plätze vergibt es beim Belegen (kleinster freier Platz).
-  Die App merkt sich Makronamen je Platz im localStorage (`tk75.macroNames`) und liest beim Verbinden die belegten
-  und die selbst angelegten Plätze.
+  Die App merkt sich Makronamen je Platz im localStorage (`tk75.macroNames`). Beim Verbinden durchsucht sie alle
+  50 Plätze (zeigt auch GearHub-Reste ohne Taste; Bluetooth: Verbinden gesamt ~2,2 s), beim Neu-Lesen nach
+  „Übernehmen“ nur noch die Plätze mit Inhalt, die belegten und die eigenen. Neue Makros bekommen nur freie Plätze.
 
 ## Offen / nächste Mitschnitte
 
