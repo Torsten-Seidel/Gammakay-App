@@ -351,6 +351,13 @@ Am Gerät geprüft (2026-11-28, Bluetooth, je ~3–4 s inkl. Kontroll-Lesen), da
   `0a 00 48 00 00 00 <Ebene 0–3> <chk>` + `00 04 00 00` … `00 07 00 00` (Ende-Byte 5 = 1 nur bei Ebene 3),
   `65 07 00 48 00` + `02` (Modus DKS), `65 04 00 48 00` + `46 00` (Punkt 70 = 0,70 mm), `65 08 00 48 01` + `01 2f 04 02`.
   Gelesen mit der App (Art 4, Art 10, Ebenen 1–3): identisch.
+- App-Schreibtest DKS F12 (2026-11-28), E = tippen Phase 1, F = `3 2` (Phase 1→3), 1,2 mm, auf allen drei Verbindungen
+  geschrieben, nachgelesen und getippt: „e“, „f“ läuft bis zum Hochgehen von ganz unten. Über Bluetooth zusätzlich
+  G = tippen Phase 3 (Ebene 2): „g“ kommt nur, wenn die Taste ganz unten war; halb drücken + loslassen beendet „f“ ohne „g“.
+  Wackelt die Taste um den 1. Punkt, beginnt Phase 1 neu (zweites „e“). Danach zurück auf normal (Art 7 = 0, Ebene 0 = F12,
+  Ebenen 1–3 leer); Art 4/8 behalten Reste ohne Wirkung. Dauer: Kabel ~4 s, Empfänger ~15 s, Bluetooth ~4 s (mit Nachlesen).
+- Electron drosselt Timer im Hintergrund auf 1 s (jedes `sleep(10)` wird 1 s, Kabel-Lesen dauerte so Minuten)
+  → `backgroundThrottling: false` im Fenster.
 - Snap Tap hat auf der TK75 keine Modi (letzte gewinnt / neutral …), nur das Tastenpaar.
 
 ## Offen / nächste Mitschnitte

@@ -48,6 +48,8 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // Sonst bremst Chromium Timer im Hintergrund auf 1 s – jedes Paket zur Tastatur dauert dann Sekunden.
+      backgroundThrottling: false,
     },
   });
 
