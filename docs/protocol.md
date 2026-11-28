@@ -303,7 +303,8 @@ inkl. Kontroll-Lesen ~7 s; F12 tippte „ab“. Danach F12 auf Werk (~6 s).
 Ebenso per Kabel (~3 s / ~2,3 s) und Bluetooth (~3 s / ~2,1 s) geprüft; F12 tippte jeweils „ab“.
 Einen Löschbefehl gibt es nicht; Platz 2 danach mit `0b 02 00 38 01` + 56 Nullbytes geleert (liest wieder `00 …`).
 Die App macht das beim Übernehmen für jedes gelöschte Makro (geprüft über Bluetooth: Anlegen ohne Taste → Löschen
-~1,9 s inkl. Kontroll-Lesen, Platz liest danach `00 …`).
+~1,9 s inkl. Kontroll-Lesen, Platz liest danach `00 …`). GearHub-Reste auf Platz 0 und 1 ebenso gelöscht
+(~2,2 s für beide); nach Neuverbinden findet das Durchsuchen aller 50 Plätze kein Makro mehr.
 
 - 50 Speicherplätze (GearHub `maxMacro`). Eine Taste löst ein Makro über die Belegung `09 <Art> <Platz> 00` aus
   (Basis `0a` oder Fn `10`). **Art steht in der Belegung, nicht im Makro:** 0 = Anzahl (`repeat_times`),
